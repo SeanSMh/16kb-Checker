@@ -1,0 +1,270 @@
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8"/>
+          <title>16KB Checker Report - shouqianba-bayarlah-google-mobileProdApp64-6.3.0-2025-11-11_16_42_20_mx_sign.aab</title>
+          <style>
+            :root {
+              --bg: #0f172a;
+              --panel: #111827;
+              --text: #e5e7eb;
+              --muted: #9ca3af;
+              --fail: #ef4444;
+              --warn: #f59e0b;
+              --ok: #22c55e;
+              --accent: #38bdf8;
+              --border: #1f2937;
+              --row: #0b1224;
+            }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+              background: radial-gradient(circle at 20% 20%, rgba(56,189,248,0.08), transparent 25%),
+                          radial-gradient(circle at 80% 0%, rgba(139,92,246,0.08), transparent 18%),
+                          var(--bg);
+              color: var(--text);
+              padding: 24px;
+            }
+            h1, h2, h3 { margin: 0 0 12px; }
+            .card {
+              background: linear-gradient(145deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+              border: 1px solid var(--border);
+              border-radius: 12px;
+              padding: 16px;
+              box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+              margin-bottom: 16px;
+            }
+            .summary-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+              gap: 12px;
+            }
+            .pill {
+              display: inline-flex;
+              align-items: center;
+              gap: 6px;
+              padding: 6px 10px;
+              border-radius: 999px;
+              font-size: 13px;
+              border: 1px solid var(--border);
+              background: rgba(255,255,255,0.04);
+            }
+            .pill.fail { color: var(--fail); border-color: rgba(239,68,68,0.5); }
+            .pill.warn { color: var(--warn); border-color: rgba(245,158,11,0.5); }
+            .pill.ok { color: var(--ok); border-color: rgba(34,197,94,0.5); }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 8px;
+              font-size: 13px;
+            }
+            th, td {
+              padding: 10px 12px;
+              border-bottom: 1px solid var(--border);
+              vertical-align: top;
+            }
+            th { text-align: left; color: var(--muted); font-weight: 600; letter-spacing: 0.2px; }
+            tr:nth-child(even) { background: var(--row); }
+            code { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; }
+            .label { font-weight: 600; color: var(--muted); margin-right: 6px; }
+            .issues.fail { color: var(--fail); }
+            .issues.warn { color: var(--warn); }
+            .meta { color: var(--muted); font-size: 13px; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h1>16KB Checker Report</h1>
+            <div class="meta">
+              <div><span class="label">Artifact:</span><code>shouqianba-bayarlah-google-mobileProdApp64-6.3.0-2025-11-11_16_42_20_mx_sign.aab</code></div>
+              
+              <div><span class="label">Generated:</span>2025-12-12T17:30:54.753128</div>
+            </div>
+            <div class="summary-grid" style="margin-top:12px;">
+              <div class="pill ok">Total: 29</div>
+              <div class="pill fail">Fail: 0</div>
+              <div class="pill warn">Warn: 29</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Failing .so</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>ABI</th>
+                  <th>Issues</th>
+                  <th>SHA256</th>
+                </tr>
+              </thead>
+              <tbody>
+                
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <h2>Warnings</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Path</th>
+                  <th>ABI</th>
+                  <th>Issues</th>
+                  <th>SHA256</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+  <td><code>base/lib/arm64-v8a/libEncryptorP.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=7400 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>745352e1b6710983e5602908837089da98d6367357264792cd08a5f8e5f3f659</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libQuCore.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=4184 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>b6940049771ecb850a9d77b5c55c510f6fcfb73767e3434a7737be7c9ca37313</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libSpeexAec.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=3000 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>508be7e97928f0e7b60dd0f4ede4ff3421c2bc9c9ab8a7581b25d3d08b407ab3</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libalivc_conan.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=2408 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>d2d21f2ed10db151178b969ab9501d41cd313ebac314f06457825801e4fd1546</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libaudio-shared.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=2272 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>4252b97d461e5e4dcf9a94fc4e701e0c05ee6c528a644e94c531dfbe85daafe3</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libc++_shared.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=11440 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=4848 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=11840 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>3e852764502d06e0cf1080d532ae7c608b7649d946a3a9d7e84e3d4b7d683214</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libcheckov.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=608 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=12992 (expected 0)</td>
+  <td><code>d74dced5f5b8538a66a34742adfd65c7ac06f889762e52d497c04d38326e663e</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libcrashsdk.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=2768 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>8116a1c29d705202c948ab24217e3e6fb2c54dbd519ed886ec69c64801f66a8b</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libgxx_personality.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=3512 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>fa92d312536a7006d96ff6739fa170c2e1e6c24786b725cc34df6701e50bff91</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libiconv.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=15176 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>955e63c4bc95bbdeed4dd75c9d560ac79d17e1f6d420acd7c1c2ac8dd5cf4ee4</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libijkffmpeg.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=12848 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>f799d44b766800ab9d945645149e11cdedb86cebabea0874033e2e10cb2f6071</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libijkplayer.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=5928 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>dcdffff9290cacf3d87b7c291b0c800b7e43cb6256f8844a89e8680faa377bb5</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libijksdl.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=528 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>a5d289eef04f00c0c4bd0bcc59a540434d80278f9e68c10e314684e4fff613c7</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libjsc.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=4352 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=13336 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>8b5f1250238835286235f890c983cd1ae608a0ca889ef94cfe5c47403b233f86</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/liblive-openh264.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=3832 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>829c73f0050cc3f1b768751a6014355f83b5e7fb1f9fd93194a6c55188d1c3ba</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/liblogging.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=7536 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>5de0f8cd9ee5f208429915a1fb2c523e9392acee26f132fecf0bcaa003103631</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libmmkv.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=6352 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=6728 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>c0328dd538d9bc58922a66c9c148272fd5e3df8048a12c4454e6f84abdd5d888</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/librtmp-jni.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=792 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>6ec6739ab4c556da085e6ec0b5f8b85a772dced510aa50c815b8e78f5d74a416</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libsaasCorePlayer.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=10480 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>43ab37e33e247132dd624d2a563b815909d69cf2a5d0beadf0eb286794ac5c7c</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libsaasDownloader.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=8848 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>37d08406f7859eda8b1974fff991790c816226801a209696dc5ca89f80777247</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libscannative.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=11000 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>e5efbf9b8822a1a3bc5c2bca775658e5c2cc0a6ce8d773416acabad10c35e014</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libsqlcipher.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=7648 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>e48af564c2b1bab7ff190e0a0c48b2a60971811596e48365655e721bf760718a</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libvmcheckov.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=6672 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=14216 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>bd709b88cfe70af228332cdeb122f4de2dfaef93168a97644f3e273902fc83bc</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libwcdb.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=9968 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>3c36684b1279f369be90d2a95ebb075f9f2d03bdc92d779cb5958111e681b7be</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libweexcore.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=5024 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=11112 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>2e5b249fd70eaada5c30819386ebb3499da170fd98a33b4e85c57c11526a408c</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libweexjsb.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=2176 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=2712 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>1807d754bc24aa52751a8f41b34db0a90a7892981d2b3a79dfea73d00591af1c</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libweexjss.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=13152 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=7912 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>09dce09ba895090fd2f3ded25872a01ca748ec73eaeeb7963db87b61bd27adb0</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libweexjst.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=2176 (expected 0)<br/>ELF_ALIGN: p_offset%pageSize=2712 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>1807d754bc24aa52751a8f41b34db0a90a7892981d2b3a79dfea73d00591af1c</code></td>
+</tr><tr>
+  <td><code>base/lib/arm64-v8a/libzbarjni.so</code></td>
+  <td>arm64-v8a</td>
+  <td class="issues warn">ELF_ALIGN: p_offset%pageSize=5608 (expected 0)<br/>ZIP_COMPRESSED: compressionMethod=8 (expected STORED=0)</td>
+  <td><code>5d9157d57ff18c59f483584b8d6588726ec3a6a46860ad384a9f815b3105dccd</code></td>
+</tr>
+              </tbody>
+            </table>
+          </div>
+        </body>
+        </html>

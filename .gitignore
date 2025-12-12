@@ -1,0 +1,52 @@
+# Gradle
+.gradle/
+**/build/
+!src/**/build/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Local configuration files
+.env
+.env.local
+.env.*.local
+
+# Gradle Wrapper
+# Comment this line if you want to track the wrapper
+# gradlew
+# gradlew.bat
+# gradle/wrapper/
