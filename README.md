@@ -25,6 +25,7 @@ check16k {
     compressedAsError.set(false)
     inferOrigin.set(true)
     reportDir.set(layout.projectDirectory.dir("check-result")) // 默认已指向 check-result
+    artifactType.set(ArtifactTypePreference.AUTO) // 可选: AUTO / APK / BUNDLE
 }
 ```
 

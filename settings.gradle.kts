@@ -7,10 +7,11 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
+        maven("https://cache-redirector.jetbrains.com/intellij-repository/releases")
     }
 }
 
@@ -19,3 +20,4 @@ rootProject.name = "check16k"
 include(":core")
 include(":gradle-plugin")
 include(":cli")
+include(":as-plugin")

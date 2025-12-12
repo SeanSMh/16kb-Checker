@@ -86,15 +86,50 @@ class Check16kPlugin : Plugin<Project> {
 
                 val apkProvider = variant.artifacts.get(SingleArtifact.APK)
                 val bundleProvider = variant.artifacts.get(SingleArtifact.BUNDLE)
-                val artifactProvider = if (apkProvider.isPresent) apkProvider else bundleProvider
-                task.artifact.set(artifactProvider)
+                val preference = extension.artifactType.getOrElse(ArtifactTypePreference.AUTO)
+                val (provider, taskName) = selectArtifact(preference, apkProvider, bundleProvider, capitalized, project)
+
+                task.artifact.set(provider)
                 task.dependsOn(collectTask)
-                val packageTask = if (apkProvider.isPresent) "package$capitalized" else "bundle$capitalized"
-                task.dependsOn(packageTask)
+                task.dependsOn(taskName)
             }
 
             project.tasks.named("check") {
                 it.dependsOn(checkTask)
+            }
+        }
+    }
+
+    private fun selectArtifact(
+        preference: ArtifactTypePreference,
+        apkProvider: com.android.build.api.variant.VariantOutputConfiguration.OutputFileProvider,
+        bundleProvider: com.android.build.api.variant.VariantOutputConfiguration.OutputFileProvider,
+        capitalized: String,
+        project: Project
+    ): Pair<org.gradle.api.provider.Provider<java.io.File>, String> {
+        return when (preference) {
+            ArtifactTypePreference.APK -> {
+                if (apkProvider.isPresent) {
+                    apkProvider to "package$capitalized"
+                } else {
+                    project.logger.warn("Requested APK but not present; falling back to bundle for $capitalized")
+                    bundleProvider to "bundle$capitalized"
+                }
+            }
+            ArtifactTypePreference.BUNDLE -> {
+                if (bundleProvider.isPresent) {
+                    bundleProvider to "bundle$capitalized"
+                } else {
+                    project.logger.warn("Requested BUNDLE but not present; falling back to apk for $capitalized")
+                    apkProvider to "package$capitalized"
+                }
+            }
+            ArtifactTypePreference.AUTO -> {
+                if (apkProvider.isPresent) {
+                    apkProvider to "package$capitalized"
+                } else {
+                    bundleProvider to "bundle$capitalized"
+                }
             }
         }
     }
