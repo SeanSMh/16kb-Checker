@@ -1,5 +1,6 @@
 package com.check16k.intellij
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.project.Project
 import javax.swing.JComponent
@@ -11,8 +12,9 @@ import java.awt.GridBagConstraints
 
 class Check16kSettingsConfigurable(private val project: Project) : Configurable {
     private val settings: Check16kSettingsState = Check16kSettingsState.getInstance(project)
-    private val variantField = JTextField()
     private val reportDirField = JTextField()
+    private val htmlCheck = javax.swing.JCheckBox("生成 HTML 报告", true)
+    private val statusLabel = JLabel().apply { foreground = java.awt.Color(0x9a, 0x9a, 0x9a) }
     private var panel: JPanel? = null
 
     override fun getDisplayName(): String = "16KB Checker"
@@ -27,14 +29,8 @@ class Check16kSettingsConfigurable(private val project: Project) : Configurable 
             insets = java.awt.Insets(4, 4, 4, 4)
         }
 
-        p.add(JLabel("Variant:"), gbc)
-        gbc.gridx = 1
-        gbc.weightx = 1.0
-        variantField.text = settings.state.variant
-        p.add(variantField, gbc)
-
         gbc.gridx = 0
-        gbc.gridy = 1
+        gbc.gridy = 0
         gbc.weightx = 0.0
         p.add(JLabel("Report dir:"), gbc)
         gbc.gridx = 1
@@ -42,25 +38,34 @@ class Check16kSettingsConfigurable(private val project: Project) : Configurable 
         reportDirField.text = settings.state.reportDir
         p.add(reportDirField, gbc)
 
+        gbc.gridx = 0
+        gbc.gridy = 1
+        gbc.weightx = 0.0
+        val htmlPanel = JPanel().apply {
+            layout = java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0)
+            add(htmlCheck)
+            add(statusLabel)
+        }
+        p.add(htmlPanel, gbc)
+
         panel = p
         return p
     }
 
     override fun isModified(): Boolean {
-        return variantField.text != settings.state.variant ||
-            reportDirField.text != settings.state.reportDir
+        return reportDirField.text != settings.state.reportDir ||
+            htmlCheck.isSelected != settings.state.htmlReport
     }
 
     override fun apply() {
-        settings.state = settings.state.copy(
-            variant = variantField.text.trim().ifEmpty { "Release" },
-            reportDir = reportDirField.text.trim().ifEmpty { "check-result" }
-        )
+        val current = settings.state
+        current.reportDir = reportDirField.text.trim().ifEmpty { "check-result" }
+        current.htmlReport = htmlCheck.isSelected
     }
 
     override fun reset() {
-        variantField.text = settings.state.variant
         reportDirField.text = settings.state.reportDir
+        htmlCheck.isSelected = settings.state.htmlReport
     }
 
     override fun disposeUIResources() {

@@ -80,6 +80,7 @@ private fun parseArgs(args: Array<String>): CliOptions? {
     var output: Path? = null
     var mdOutput: Path? = null
     var htmlOutput: Path? = null
+    var autoArtifactDir: Path? = null
     var pageSize = CheckConfig.DEFAULT_PAGE_SIZE
     var checkZipAlignment = true
     var checkCompressed = true
@@ -95,6 +96,10 @@ private fun parseArgs(args: Array<String>): CliOptions? {
             "--output" -> output = iterator.nextOrNull("output")?.let { Path.of(it) } ?: return null
             "--md-output" -> mdOutput = iterator.nextOrNull("markdown output")?.let { Path.of(it) } ?: return null
             "--html-output" -> htmlOutput = iterator.nextOrNull("html output")?.let { Path.of(it) } ?: return null
+            "--auto-artifact" -> {
+                val dir = iterator.nextOrNull("artifact search dir") ?: return null
+                autoArtifactDir = Path.of(dir)
+            }
             "--page-size" -> {
                 val value = iterator.nextOrNull("page size") ?: return null
                 pageSize = value.toIntOrNull() ?: run {
@@ -122,14 +127,27 @@ private fun parseArgs(args: Array<String>): CliOptions? {
         }
     }
 
-    if (artifact == null) {
-        println("Missing artifact path.")
-        printUsage()
-        return null
+    val resolvedArtifact = when {
+        artifact != null -> artifact
+        autoArtifactDir != null -> {
+            val found = findLatestArtifact(autoArtifactDir!!)
+            if (found == null) {
+                println("No APK/AAB found under $autoArtifactDir")
+                return null
+            } else {
+                println("Auto-detected artifact: $found")
+                found
+            }
+        }
+        else -> {
+            println("Missing artifact path. Provide a path or use --auto-artifact <dir>.")
+            printUsage()
+            return null
+        }
     }
 
     return CliOptions(
-        artifact = artifact,
+        artifact = resolvedArtifact,
         variant = variant,
         originsFile = originsFile,
         output = output,
@@ -157,6 +175,7 @@ private fun printUsage() {
         16KB Checker CLI
         Usage: check16k <artifact.apk|aab> [options]
         Options:
+          --auto-artifact <dir>     Auto-detect latest APK/AAB under dir
           --variant <name>           Variant name for report metadata
           --origins <file>           JSON hash → origin mapping file
           --output <file>            Write report JSON to file (default: stdout)
@@ -171,4 +190,26 @@ private fun printUsage() {
           -h, --help                 Show this help
         """.trimIndent()
     )
+}
+
+private fun findLatestArtifact(dir: Path, maxDepth: Int = 6): Path? {
+    return try {
+        Files.walk(dir, maxDepth)
+            .use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it) }
+                    .filter { path ->
+                        val name = path.fileName.toString().lowercase()
+                        name.endsWith(".apk") || name.endsWith(".aab")
+                    }
+                    .max { a, b ->
+                        val t1 = Files.getLastModifiedTime(a).toMillis()
+                        val t2 = Files.getLastModifiedTime(b).toMillis()
+                        t1.compareTo(t2)
+                    }
+                    .orElse(null)
+            }
+    } catch (_: Throwable) {
+        null
+    }
 }

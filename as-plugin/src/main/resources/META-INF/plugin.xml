@@ -6,10 +6,11 @@
     <description>Run check16k Gradle tasks and view 16KB alignment reports with origin attribution.</description>
 
     <depends>com.intellij.modules.platform</depends>
-    <depends>com.intellij.modules.android</depends>
     <depends>org.jetbrains.plugins.gradle</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="check16k.notifications" displayType="BALLOON" isLogByDefault="true"/>
+        <projectService serviceImplementation="com.check16k.intellij.Check16kSettingsState"/>
         <toolWindow id="16KB Checker"
                     anchor="right"
                     factoryClass="com.check16k.intellij.Check16kToolWindowFactory"
@@ -22,7 +23,7 @@
         <action id="com.check16k.intellij.RunCheckAction"
                 class="com.check16k.intellij.RunCheckAction"
                 text="Run 16KB Checker"
-                description="Run check16k<Variant> Gradle task">
+                description="Run check16k variant Gradle task">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>

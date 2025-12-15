@@ -6,6 +6,12 @@ plugins {
 allprojects {
     group = "com.check16k"
     version = "0.1.0-SNAPSHOT"
+
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://cache-redirector.jetbrains.com/intellij-repository/releases")
+    }
 }
 
 subprojects {

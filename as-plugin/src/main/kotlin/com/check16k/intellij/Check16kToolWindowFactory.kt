@@ -9,8 +9,10 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.table.JBTable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import java.awt.BorderLayout
+import java.nio.file.Files
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -53,7 +55,9 @@ class Check16kToolWindowFactory : ToolWindowFactory {
 
     private fun loadReport(project: Project, state: Check16kSettingsState.State, model: ReportTableModel): String? {
         val base = project.basePath ?: return null
-        val reportPath = Path.of(base, state.reportDir, "${state.variant}.json")
+        // 按目录下最新的 json 报告加载，避免依赖 variant 设置
+        val reportDir = Path.of(base, state.reportDir)
+        val reportPath = latestJson(reportDir) ?: return null
         val file = reportPath.toFile()
         if (!file.exists()) {
             return null
@@ -65,6 +69,21 @@ class Check16kToolWindowFactory : ToolWindowFactory {
             reportPath.toString()
         } catch (t: Throwable) {
             Messages.showErrorDialog(project, "Failed to load report: ${t.message}", "16KB Checker")
+            null
+        }
+    }
+
+    private fun latestJson(dir: Path): Path? {
+        return try {
+            Files.list(dir)
+                .filter { Files.isRegularFile(it) && it.fileName.toString().lowercase().endsWith(".json") }
+                .max { a, b ->
+                    val t1 = Files.getLastModifiedTime(a).toMillis()
+                    val t2 = Files.getLastModifiedTime(b).toMillis()
+                    t1.compareTo(t2)
+                }
+                .orElse(null)
+        } catch (_: Exception) {
             null
         }
     }

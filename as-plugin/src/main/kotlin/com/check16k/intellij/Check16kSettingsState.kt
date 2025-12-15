@@ -15,8 +15,8 @@ class Check16kSettingsState : PersistentStateComponent<Check16kSettingsState.Sta
     }
 
     data class State(
-        var variant: String = "Release",
-        var reportDir: String = "check-result"
+        var reportDir: String = "check-result",
+        var htmlReport: Boolean = true
     )
 
     private var state = State()
