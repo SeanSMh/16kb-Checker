@@ -1,0 +1,323 @@
+import java.security.MessageDigest
+
+def OUT_FILE = new File('__OUT_JSON_ABS_PATH__')
+OUT_FILE.parentFile.mkdirs()
+if (OUT_FILE.exists()) OUT_FILE.delete()
+
+def TARGET_MODULE = '__TARGET_MODULE__'
+def VARIANT = '__VARIANT__'
+
+def L = { msg -> logger.lifecycle("[16KB][init] " + msg) }
+
+def nowIso() {
+    try { return java.time.OffsetDateTime.now().toString() } catch (Throwable ignore) { return null }
+}
+
+def sha256File = { File f ->
+    def md = MessageDigest.getInstance("SHA-256")
+    f.withInputStream { is ->
+        byte[] buf = new byte[8192]
+        int n
+        while ((n = is.read(buf)) > 0) md.update(buf, 0, n)
+    }
+    return md.digest().collect { String.format("%02x", it) }.join()
+}
+
+def jsonEscape = { String s ->
+    if (s == null) return "null"
+    return '"' + s
+        .replace("\\\\", "\\\\\\\\")
+        .replace("\"", "\\\\\"")
+        .replace("\r", "\\\\r")
+        .replace("\n", "\\\\n")
+        .replace("\t", "\\\\t") + '"'
+}
+
+def items = []
+def addItem = { Map m -> items.add(m) }
+
+def safeRelPath = { File base, File f ->
+    try { return base.toPath().relativize(f.toPath()).toString() } catch (Throwable ignore) { return f.absolutePath }
+}
+
+def guessAbiFromPath = { String path ->
+    if (path == null) return null
+    def p = path.replace("\\\\", "/")
+    def parts = p.split("/")
+    for (int i = 0; i < parts.length; i++) {
+        def seg = parts[i]
+        if (seg == "lib" || seg == "jni") {
+            if (i + 1 < parts.length) return parts[i + 1]
+        }
+    }
+    return null
+}
+
+/** 1) merged_native_libs：最终产物 so 列表 */
+def scanMergedNativeLibs = { Project p, String variant ->
+    def base = new File(p.buildDir, "intermediates/merged_native_libs/" + variant + "/out/lib")
+    int cnt = 0
+    if (!base.exists()) {
+        L("WARN merged_native_libs not found: " + base.absolutePath)
+        return cnt
+    }
+    p.fileTree(base).matching { include "**/*.so" }.files.each { File f ->
+        def sha = sha256File(f)
+        def rel = safeRelPath(p.rootProject.projectDir, f)
+        def abi = guessAbiFromPath(rel)
+        addItem([
+            sha256: sha,
+            soName: f.name,
+            abi: abi,
+            projectPath: p.path,
+            dependency: [ id: "unknown" ],
+            origin: [
+                type: "merged_native_libs",
+                path: rel
+            ]
+        ])
+        cnt++
+    }
+    L("merged_native_libs so count = " + cnt + " (" + base.absolutePath + ")")
+    return cnt
+}
+
+/** 2) 本地 jniLibs（可选） */
+def scanLocalJniLibs = { Project p ->
+    def dir = new File(p.projectDir, "src/main/jniLibs")
+    int cnt = 0
+    if (!dir.exists()) return cnt
+
+    p.fileTree(dir).matching { include "**/*.so" }.files.each { File f ->
+        def sha = sha256File(f)
+        def rel = safeRelPath(p.rootProject.projectDir, f)
+        def abi = guessAbiFromPath(rel)
+        addItem([
+            sha256: sha,
+            soName: f.name,
+            abi: abi,
+            projectPath: p.path,
+            dependency: [ id: "local" ],
+            origin: [
+                type: "local_jniLibs",
+                path: rel
+            ]
+        ])
+        cnt++
+    }
+    if (cnt > 0) L("local jniLibs so count = " + cnt)
+    return cnt
+}
+
+/** 从 exploded-aar 路径解析出 group:name:version */
+def parseGavFromExplodedAarPath = { String absPath ->
+    if (absPath == null) return null
+    def p = absPath.replace("\\\\", "/")
+    def idx = p.indexOf("/intermediates/exploded-aar/")
+    if (idx < 0) return null
+    def tail = p.substring(idx + "/intermediates/exploded-aar/".length())
+    def parts = tail.split("/")
+    if (parts.length >= 3) {
+        return parts[0] + ":" + parts[1] + ":" + parts[2]
+    }
+    return null
+}
+
+/** 3) 第一段索引：扫 exploded-aar（快、可解析 GAV） */
+def buildExplodedAarSoIndex = { Project p ->
+    def index = [:] // sha -> [depId, path]
+    int scanned = 0
+
+    def base = new File(p.buildDir, "intermediates/exploded-aar")
+    if (!base.exists()) {
+        L("exploded-aar not found: " + base.absolutePath)
+        return index
+    }
+
+    p.fileTree(base).matching {
+        include "**/jni/**/*.so"
+        include "**/lib/**/*.so"
+    }.files.each { File f ->
+        def sha = sha256File(f)
+        def depId = parseGavFromExplodedAarPath(f.absolutePath)
+        if (depId == null) depId = "unknown"
+        def rel = safeRelPath(p.rootProject.projectDir, f)
+
+        def old = index[sha]
+        if (old == null || (old.depId == "unknown" && depId != "unknown")) {
+            index[sha] = [depId: depId, path: rel]
+        }
+        scanned++
+    }
+
+    L("exploded-aar index scanned=" + scanned + ", unique sha=" + index.size())
+    return index
+}
+
+/** 4) enrich：把 items 里 dependency.id=unknown 的 sha 用 index 匹配 */
+def enrichUnknowns = { List itemList, Map shaIndex, String matchType ->
+    int hit = 0
+    itemList.each { Map it ->
+        if (it == null) return
+        if (it.dependency == null || it.dependency.id != "unknown") return
+
+        def sha = it.sha256
+        def found = shaIndex[sha]
+        if (found == null) return
+
+        it.dependency = [ id: found.depId ]
+        it.origin.match = [ type: matchType, path: found.path ]
+        hit++
+    }
+    L("enrich hit (" + matchType + ") = " + hit)
+    return hit
+}
+
+/** 收集 still-unknown 的 sha（用于第二段 transforms 精准补扫） */
+def collectUnknownShaSet = { List itemList ->
+    def set = [] as Set
+    itemList.each { Map it ->
+        if (it?.dependency?.id == "unknown" && it?.sha256 != null) {
+            set.add(it.sha256.toString())
+        }
+    }
+    return set
+}
+
+/**
+ * 5) 第二段索引：扫 transforms（慢但命中率高）
+ * 只针对 unknown sha 做“精准补扫”，避免全盘扫爆。
+ * 输出 depId 只能做到 jetified:xxx（Gradle 缓存里通常拿不到完整 GAV）。
+ */
+def buildTransformsSoIndexForShaSet = { Gradle g, Set<String> targetShaSet ->
+    def index = [:] // sha -> [depId, path]
+    if (targetShaSet == null || targetShaSet.isEmpty()) {
+        L("transforms skip: no unknown sha")
+        return index
+    }
+
+    File gradleHome = g.gradleUserHomeDir
+    File caches = new File(gradleHome, "caches")
+    if (!caches.exists()) {
+        L("transforms skip: gradle caches not found: " + caches.absolutePath)
+        return index
+    }
+
+    // transforms-* 目录（不同 Gradle 版本名字会变，做前缀匹配）
+    def transformsDirs = caches.listFiles()?.findAll { it.isDirectory() && it.name.startsWith("transforms-") } ?: []
+    if (transformsDirs.isEmpty()) {
+        L("transforms skip: no transforms-* under " + caches.absolutePath)
+        return index
+    }
+
+    int scanned = 0
+    int matched = 0
+
+    transformsDirs.each { File td ->
+        // 常见：.../transforms-*/files-*/**/jetified-xxx.aar/jni/**.so
+        // 也可能是 .../transforms-*/files-*/**/jetified-xxx/jni/**.so（少见）
+        def tree = g.rootProject.fileTree(td).matching {
+            include "**/jetified-*.aar/**/jni/**/*.so"
+            include "**/jetified-*.aar/**/lib/**/*.so"
+            include "**/jetified-*/**/jni/**/*.so"
+            include "**/jetified-*/**/lib/**/*.so"
+        }
+
+        tree.files.each { File f ->
+            scanned++
+            def sha = sha256File(f)
+            if (!targetShaSet.contains(sha)) return
+
+            // depId：优先从 jetified-xxx.aar 推断
+            def p = f.absolutePath.replace("\\\\", "/")
+            def m = (p =~ /jetified-([^\/]+?)(?:\.aar)?\//)
+            def depId = m.find() ? ("jetified:" + m.group(1)) : "jetified:unknown"
+            def rel = safeRelPath(g.rootProject.projectDir, f)
+
+            if (!index.containsKey(sha)) {
+                index[sha] = [depId: depId, path: rel]
+                matched++
+            }
+        }
+    }
+
+    L("transforms scanned=" + scanned + ", matched(unknown sha)=" + matched + ", unique sha=" + index.size())
+    return index
+}
+
+/** main */
+gradle.projectsEvaluated {
+    L("projectsEvaluated -> start scan (module=" + TARGET_MODULE + ", variant=" + VARIANT + ")")
+
+    def p = rootProject.findProject(TARGET_MODULE)
+    if (p == null) {
+        L("ERROR: target module not found: " + TARGET_MODULE)
+    } else {
+        int mergedCount = 0
+        try { mergedCount = scanMergedNativeLibs(p, VARIANT) } catch (Throwable t) { L("WARN scanMergedNativeLibs: " + t.message) }
+
+        try { scanLocalJniLibs(p) } catch (Throwable t) { L("WARN scanLocalJniLibs: " + t.message) }
+
+        if (mergedCount > 0) {
+            // 第一段：exploded-aar
+            Map idx1 = [:]
+            try { idx1 = buildExplodedAarSoIndex(p) } catch (Throwable t) { L("WARN buildExplodedAarSoIndex: " + t.message) }
+            try { enrichUnknowns(items, idx1, "exploded_aar_jni") } catch (Throwable t) { L("WARN enrich exploded: " + t.message) }
+
+            // 第二段：transforms（只补 unknown sha）
+            def unknownSha = collectUnknownShaSet(items)
+            L("unknown sha after exploded-aar = " + unknownSha.size())
+            if (!unknownSha.isEmpty()) {
+                Map idx2 = [:]
+                try { idx2 = buildTransformsSoIndexForShaSet(gradle, unknownSha) } catch (Throwable t) { L("WARN buildTransformsSoIndex: " + t.message) }
+                try { enrichUnknowns(items, idx2, "transforms_jetified_jni") } catch (Throwable t) { L("WARN enrich transforms: " + t.message) }
+            }
+        } else {
+            L("WARN merged_native_libs empty -> build the variant first (or run merge<Variant>NativeLibs).")
+        }
+    }
+
+    L("scan finished. items=" + items.size())
+}
+
+gradle.buildFinished { result ->
+    def sb = new StringBuilder()
+    sb.append("{")
+    sb.append("\"version\":1,")
+    sb.append("\"generatedAt\":").append(jsonEscape(nowIso())).append(",")
+    sb.append("\"module\":").append(jsonEscape(TARGET_MODULE)).append(",")
+    sb.append("\"variant\":").append(jsonEscape(VARIANT)).append(",")
+    sb.append("\"items\":[")
+    for (int i = 0; i < items.size(); i++) {
+        def item = items[i]
+        if (i > 0) sb.append(",")
+
+        sb.append("{")
+        sb.append("\"sha256\":").append(jsonEscape(item.sha256))
+        sb.append(",\"soName\":").append(jsonEscape(item.soName))
+        sb.append(",\"abi\":").append(item.abi == null ? "null" : jsonEscape(item.abi))
+        sb.append(",\"projectPath\":").append(jsonEscape(item.projectPath?.toString()))
+
+        if (item.dependency != null) {
+            sb.append(",\"dependency\":{")
+            sb.append("\"id\":").append(jsonEscape(item.dependency.id?.toString()))
+            sb.append("}")
+        }
+
+        sb.append(",\"origin\":{")
+        sb.append("\"type\":").append(jsonEscape(item.origin?.type?.toString()))
+        if (item.origin?.path != null) sb.append(",\"path\":").append(jsonEscape(item.origin.path.toString()))
+        if (item.origin?.match != null) {
+            sb.append(",\"match\":{")
+            sb.append("\"type\":").append(jsonEscape(item.origin.match.type?.toString()))
+            if (item.origin.match.path != null) sb.append(",\"path\":").append(jsonEscape(item.origin.match.path.toString()))
+            sb.append("}")
+        }
+        sb.append("}")
+
+        sb.append("}")
+    }
+    sb.append("]}")
+    OUT_FILE.setText(sb.toString(), "UTF-8")
+    L("Wrote json -> " + OUT_FILE.absolutePath + ", items=" + items.size())
+}

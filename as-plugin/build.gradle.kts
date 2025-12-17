@@ -13,6 +13,7 @@ intellij {
     // 使用 IntelliJ IDEA 2023.1 平台（231.*），包含 Gradle/External System
     version.set("2023.1.5")
     type.set("IC")
+    pluginName.set("16kb-check")
     // 使用明确的插件 ID，保证 Gradle External System API 进入编译类路径
     plugins.set(listOf("java", "org.jetbrains.plugins.gradle"))
     downloadSources.set(false)
@@ -28,7 +29,7 @@ tasks {
         // 与 Android Studio 当前使用的 252.* 平台对齐，避免版本不兼容提示
         sinceBuild.set("252")
         untilBuild.set("252.*")
-        pluginDescription.set("16KB Checker: run check16k Gradle tasks and view reports (with origin attribution).")
+        pluginDescription.set("16kb-check: run check16k Gradle tasks and view reports (with origin attribution).")
     }
     publishPlugin {
         // Configure plugin publishing if needed.

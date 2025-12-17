@@ -33,7 +33,7 @@ object ReportWriter {
 
     fun toMarkdown(report: ScanReport): String {
         val builder = StringBuilder()
-        builder.appendLine("# 16KB Checker Report")
+        builder.appendLine("# 16kb-check Report")
         builder.appendLine()
         builder.appendLine("- Artifact: ${report.artifact}")
         report.variant?.let { builder.appendLine("- Variant: $it") }
@@ -76,7 +76,12 @@ object ReportWriter {
         fun issuesCell(item: ScanItem, severity: Severity): String {
             return item.issues
                 .filter { it.severity == severity }
-                .joinToString("<br/>") { "${it.type}: ${it.detail}" }
+                .joinToString("<br/>") { "${escape(it.type.name)}: ${escape(it.detail)}" }
+        }
+
+        fun originCell(item: ScanItem): String {
+            if (item.origin.isEmpty()) return "<span class=\"text-muted\">unknown</span>"
+            return item.origin.joinToString("<br/>") { escape(describeOrigin(it.origin)) }
         }
 
         return """
@@ -84,38 +89,42 @@ object ReportWriter {
         <html lang="en">
         <head>
           <meta charset="UTF-8"/>
-          <title>16KB Checker Report - ${report.artifact}</title>
+          <title>16kb-check Report - ${report.artifact}</title>
           <style>
             :root {
-              --bg: #0f172a;
-              --panel: #111827;
-              --text: #e5e7eb;
-              --muted: #9ca3af;
-              --fail: #ef4444;
-              --warn: #f59e0b;
-              --ok: #22c55e;
+              --bg: #0a0f1c;
+              --panel: #0f172a;
+              --panel-2: #111c34;
+              --text: #e7edf6;
+              --muted: #9ba9c2;
+              --fail: #f87171;
+              --warn: #fbbf24;
+              --ok: #34d399;
               --accent: #38bdf8;
-              --border: #1f2937;
-              --row: #0b1224;
+              --border: #1f2a3d;
+              --row: #0c1426;
+              --shadow: 0 14px 40px rgba(0,0,0,0.35);
             }
             * { box-sizing: border-box; }
             body {
               margin: 0;
-              font-family: "SF Pro Text", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-              background: radial-gradient(circle at 20% 20%, rgba(56,189,248,0.08), transparent 25%),
-                          radial-gradient(circle at 80% 0%, rgba(139,92,246,0.08), transparent 18%),
-                          var(--bg);
+              font-family: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+              background:
+                radial-gradient(circle at 18% 20%, rgba(56,189,248,0.12), transparent 30%),
+                radial-gradient(circle at 82% 12%, rgba(94,234,212,0.10), transparent 28%),
+                radial-gradient(circle at 50% 80%, rgba(236,72,153,0.08), transparent 35%),
+                var(--bg);
               color: var(--text);
               padding: 24px;
             }
-            h1, h2, h3 { margin: 0 0 12px; }
+            h1, h2, h3 { margin: 0 0 12px; letter-spacing: 0.3px; }
             .card {
-              background: linear-gradient(145deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+              background: linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
               border: 1px solid var(--border);
-              border-radius: 12px;
+              border-radius: 14px;
               padding: 16px;
-              box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-              margin-bottom: 16px;
+              box-shadow: var(--shadow);
+              margin-bottom: 18px;
             }
             .summary-grid {
               display: grid;
@@ -126,38 +135,66 @@ object ReportWriter {
               display: inline-flex;
               align-items: center;
               gap: 6px;
-              padding: 6px 10px;
+              padding: 7px 11px;
               border-radius: 999px;
               font-size: 13px;
               border: 1px solid var(--border);
               background: rgba(255,255,255,0.04);
+              line-height: 1.3;
             }
-            .pill.fail { color: var(--fail); border-color: rgba(239,68,68,0.5); }
-            .pill.warn { color: var(--warn); border-color: rgba(245,158,11,0.5); }
-            .pill.ok { color: var(--ok); border-color: rgba(34,197,94,0.5); }
+            .pill.fail { color: var(--fail); border-color: rgba(248,113,113,0.5); background: rgba(248,113,113,0.08); }
+            .pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.08); }
+            .pill.ok { color: var(--ok); border-color: rgba(52,211,153,0.5); background: rgba(52,211,153,0.08); }
+            .pill.muted { color: var(--muted); border-color: rgba(255,255,255,0.1); }
+            .table-wrap {
+              margin-top: 10px;
+              border: 1px solid var(--border);
+              border-radius: 12px;
+              overflow: hidden;
+              background: var(--panel);
+              box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+            }
             table {
               width: 100%;
               border-collapse: collapse;
-              margin-top: 8px;
               font-size: 13px;
             }
+            thead {
+              background: linear-gradient(90deg, rgba(56,189,248,0.08), rgba(94,234,212,0.04));
+            }
             th, td {
-              padding: 10px 12px;
+              padding: 12px 14px;
               border-bottom: 1px solid var(--border);
               vertical-align: top;
+              word-break: break-word;
             }
             th { text-align: left; color: var(--muted); font-weight: 600; letter-spacing: 0.2px; }
-            tr:nth-child(even) { background: var(--row); }
+            th:not(:last-child), td:not(:last-child) { border-right: 1px solid var(--border); }
+            tbody tr:hover { background: rgba(56,189,248,0.05); }
+            tbody tr:last-child td { border-bottom: none; }
             code { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 12px; }
             .label { font-weight: 600; color: var(--muted); margin-right: 6px; }
-            .issues.fail { color: var(--fail); }
-            .issues.warn { color: var(--warn); }
+            .issues.fail { color: var(--fail); font-weight: 600; }
+            .issues.warn { color: var(--warn); font-weight: 600; }
             .meta { color: var(--muted); font-size: 13px; }
+            .section-head {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 8px;
+              flex-wrap: wrap;
+            }
+            .col-path { width: 28%; }
+            .col-abi { width: 8%; }
+            .col-issues { width: 28%; }
+            .col-sha { width: 14%; word-break: break-all; }
+            .col-origin { width: 22%; word-break: break-all; }
+            .text-muted { color: var(--muted); }
           </style>
         </head>
         <body>
           <div class="card">
-            <h1>16KB Checker Report</h1>
+            <h1>16kb-check Report</h1>
             <div class="meta">
               <div><span class="label">Artifact:</span><code>${report.artifact}</code></div>
               ${report.variant?.let { "<div><span class=\"label\">Variant:</span><code>$it</code></div>" } ?: ""}
@@ -171,55 +208,69 @@ object ReportWriter {
           </div>
 
           <div class="card">
-            <h2>Failing .so</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Path</th>
-                  <th>ABI</th>
-                  <th>Issues</th>
-                  <th>SHA256</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${failItems.joinToString("") { item ->
+            <div class="section-head">
+              <h2>Failing .so</h2>
+              <span class="pill fail">Fail: ${failItems.size}</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-path">Path</th>
+                    <th class="col-abi">ABI</th>
+                    <th class="col-issues">Issues</th>
+                    <th class="col-sha">SHA256</th>
+                    <th class="col-origin">Origin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${failItems.joinToString("") { item ->
             """
-                <tr>
-                  <td><code>${item.path}</code></td>
-                  <td>${item.abi ?: "-"}</td>
-                  <td class="issues fail">${issuesCell(item, Severity.FAIL)}</td>
-                  <td><code>${item.sha256}</code></td>
-                </tr>
-                """.trimIndent()
+                  <tr>
+                    <td class="col-path"><code>${escape(item.path)}</code></td>
+                    <td class="col-abi">${escape(item.abi ?: "-")}</td>
+                    <td class="issues fail col-issues">${issuesCell(item, Severity.FAIL)}</td>
+                    <td class="col-sha"><code>${escape(item.sha256)}</code></td>
+                    <td class="col-origin">${originCell(item)}</td>
+                  </tr>
+                  """.trimIndent()
         }}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div class="card">
-            <h2>Warnings</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Path</th>
-                  <th>ABI</th>
-                  <th>Issues</th>
-                  <th>SHA256</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${warnItems.joinToString("") { item ->
+            <div class="section-head">
+              <h2>Warnings</h2>
+              <span class="pill warn">Warn: ${warnItems.size}</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-path">Path</th>
+                    <th class="col-abi">ABI</th>
+                    <th class="col-issues">Issues</th>
+                    <th class="col-sha">SHA256</th>
+                    <th class="col-origin">Origin</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${warnItems.joinToString("") { item ->
             """
-                <tr>
-                  <td><code>${item.path}</code></td>
-                  <td>${item.abi ?: "-"}</td>
-                  <td class="issues warn">${issuesCell(item, Severity.WARN)}</td>
-                  <td><code>${item.sha256}</code></td>
-                </tr>
-                """.trimIndent()
+                  <tr>
+                    <td class="col-path"><code>${escape(item.path)}</code></td>
+                    <td class="col-abi">${escape(item.abi ?: "-")}</td>
+                    <td class="issues warn col-issues">${issuesCell(item, Severity.WARN)}</td>
+                    <td class="col-sha"><code>${escape(item.sha256)}</code></td>
+                    <td class="col-origin">${originCell(item)}</td>
+                  </tr>
+                  """.trimIndent()
         }}
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
           </div>
         </body>
         </html>
@@ -237,4 +288,16 @@ object ReportWriter {
         }
         Files.writeString(output, content)
     }
+
+    private fun describeOrigin(origin: Origin): String {
+        return when (origin) {
+            is Origin.Maven -> "maven:${origin.gav}"
+            is Origin.Project -> "project:${origin.path} (${origin.source})"
+            is Origin.File -> origin.path
+            Origin.Unknown -> "unknown"
+        }
+    }
+
+    private fun escape(text: String): String =
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 }
