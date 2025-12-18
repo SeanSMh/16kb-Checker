@@ -1,6 +1,7 @@
 package com.check16k.intellij.variant
 
 import com.intellij.openapi.project.Project
+import com.check16k.intellij.variant.AppModuleLocator
 
 /**
  * 尝试监听 Build Variant 选择变化（若当前 AS 版本提供该类）。
@@ -31,7 +32,7 @@ object VariantSelectionListener {
                 if (method.name.contains("buildVariantSelected", true)) {
                     // 如果能拿到 facet，再判断是否 app 模块
                     val facet = args?.firstOrNull()
-                    val app = AppModuleLocator.findAppModule(project)
+                    val app = AppModuleLocator.findAppIdeModule(project)
                     val facetModule = runCatching {
                         facet?.javaClass?.methods?.firstOrNull { it.name == "getModule" }?.invoke(facet)
                     }.getOrNull()

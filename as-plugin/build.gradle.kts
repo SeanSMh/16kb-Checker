@@ -15,7 +15,8 @@ intellij {
     type.set("IC")
     pluginName.set("16kb-check")
     // 使用明确的插件 ID，保证 Gradle External System API 进入编译类路径
-    plugins.set(listOf("java", "org.jetbrains.plugins.gradle"))
+
+    plugins.set(listOf("java", "org.jetbrains.plugins.gradle", "android"))
     downloadSources.set(false)
 }
 

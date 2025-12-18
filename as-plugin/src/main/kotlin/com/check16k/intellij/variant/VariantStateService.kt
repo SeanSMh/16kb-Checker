@@ -1,12 +1,15 @@
 package com.check16k.intellij.variant
 
 import com.intellij.openapi.components.Service
-import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.project.Project
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * Project 级别缓存当前 app module 的选中 variant，并提供监听。
+ *
+ * 注意：
+ * - modulePath 必须是 GradlePath（:app / :feature:xxx），不要用 IDE module.name 直接拼
+ * - variant 优先来自 Model，其次来自 Facet(IdeaAndroidProject.selectedVariantName)
  */
 @Service(Service.Level.PROJECT)
 class VariantStateService(private val project: Project) {
@@ -25,10 +28,10 @@ class VariantStateService(private val project: Project) {
     }
 
     /**
-     * 立即读取当前 app module 的选中 variant（Facet -> IdeaAndroidProject），并广播。
+     * 立即读取当前 app module 的选中 variant，并广播。
      */
     fun refreshNow() {
-        val selection = VariantReader.getSelectedAppVariant(project)
+        val selection = readCurrentAppSelection()
         current = selection
         listeners.forEach { it(selection) }
     }
@@ -44,21 +47,29 @@ class VariantStateService(private val project: Project) {
         VariantSyncListener.install(project) { refreshNow() }
 
         // Build Variant 切换监听（若可用）
-        VariantSelectionListener.install(project) {
-            refreshNow()
-        }
+        VariantSelectionListener.install(project) { refreshNow() }
 
         // 首次读取
         refreshNow()
     }
 
     /**
-     * 如果没有 facet/模型，兜底返回模块名叫 app 的 modulePath。
+     * 兜底：返回 app 的 GradlePath（优先 facet.getModulePath()==":app"）
      */
-    fun guessAppModulePath(): String? {
-        val mm = ModuleManager.getInstance(project)
-        return mm.findModuleByName(AppModuleLocator.APP_MODULE_NAME)?.let { ":" + it.name }
-            ?: mm.modules.firstOrNull { it.name == AppModuleLocator.APP_MODULE_NAME }?.let { ":" + it.name }
+    fun guessAppModulePath(): String = AppModuleLocator.findAppGradlePath(project)
+
+    // -------------------- private --------------------
+
+    private fun readCurrentAppSelection(): VariantSelection? {
+        val ideAppModule = AppModuleLocator.findAppIdeModule(project) ?: return null
+
+        val modulePath = VariantReader.getFacetModulePath(ideAppModule) ?: ":app"
+
+        // 变体优先：Model -> Facet
+        val variant = VariantReader.getSelectedVariantFromModels(ideAppModule)
+            ?: VariantReader.getSelectedVariantForModule(ideAppModule)
+
+        return if (!variant.isNullOrBlank()) VariantSelection(modulePath = modulePath, variant = variant) else null
     }
 }
 

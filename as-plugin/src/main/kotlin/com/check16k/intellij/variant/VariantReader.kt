@@ -1,57 +1,105 @@
 package com.check16k.intellij.variant
 
 import com.intellij.openapi.module.Module
-import com.intellij.openapi.module.ModuleManager
-import com.intellij.openapi.project.Project
 
 object VariantReader {
 
     /**
-     * 最直接：AndroidFacet -> IdeaAndroidProject 读取当前选中 variant。
+     * 读取 Build Variants 面板“当前选中 variant”
+     * 走 AndroidFacet -> IdeaAndroidProject.selectedVariantName（反射）
      */
-    fun getSelectedVariantFromFacet(module: Module): String? {
+    fun getSelectedVariantForModule(module: Module): String? {
+        val facet = getAndroidFacet(module)
+        println("facet=${facet != null}")
+        val idea = getIdeaAndroidProject(module)
+        println("ideaAndroidProject=${idea != null} class=${idea?.javaClass?.name}")
+        println("selectedVariantName=${idea?.let { invokeStringGetter(it, "getSelectedVariantName") }}")
+
+        val ideaAndroidProject = getIdeaAndroidProject(module) ?: return null
+        return invokeStringGetter(ideaAndroidProject, "getSelectedVariantName")
+    }
+
+    /**
+     * 尝试从 Android Gradle Model 读取 selectedVariant（不同版本可能有不同类名）
+     * - 优先 getSelectedVariantName
+     * - 再退回 getSelectedVariant().getName()
+     */
+    fun getSelectedVariantFromModels(module: Module): String? {
+        val model = getGradleAndroidModel(module) ?: return null
+
+        invokeStringGetter(model, "getSelectedVariantName")?.let { return it }
+
+        // getSelectedVariant().getName()
+        val selectedVariant = runCatching { model.javaClass.methods.firstOrNull { it.name == "getSelectedVariant" && it.parameterCount == 0 }?.invoke(model) }
+            .getOrNull() ?: return null
+        return invokeStringGetter(selectedVariant, "getName")
+    }
+
+    /**
+     * ✅ 供 RunCheckAction 精确匹配 GradlePath 用
+     * 从 AndroidFacet 里反射取 modulePath / gradlePath（不同版本方法名可能不同）
+     */
+    fun getFacetModulePath(module: Module): String? {
+        val facet = getAndroidFacet(module) ?: return null
+        // 常见方法名：getModulePath / getGradlePath
+        return invokeStringGetter(facet, "getModulePath")
+            ?: invokeStringGetter(facet, "getGradlePath")
+    }
+
+    // ---------------- private ----------------
+
+    private fun getAndroidFacet(module: Module): Any? {
         val facetClass = runCatching {
             Class.forName("org.jetbrains.android.facet.AndroidFacet", false, VariantReader::class.java.classLoader)
         }.getOrNull() ?: return null
-        val getInstance = facetClass.methods.firstOrNull { it.name == "getInstance" && it.parameterTypes.size == 1 }
-            ?: return null
-        val facet = runCatching { getInstance.invoke(null, module) }.getOrNull() ?: return null
 
-        // ideaAndroidProject.selectedVariantName
-        runCatching {
-            val ideaProject = facet.javaClass.methods.firstOrNull { it.name == "getIdeaAndroidProject" }?.invoke(facet)
-            ideaProject?.javaClass?.methods?.firstOrNull { it.name == "getSelectedVariantName" }?.invoke(ideaProject) as? String
-        }.getOrNull()?.let { if (!it.isNullOrBlank()) return it }
-
-        // Facet 直接暴露 selected variant 的 getter
-        runCatching {
-            facet.javaClass.methods.firstOrNull { it.name.contains("SelectedVariant", true) }?.invoke(facet) as? String
-        }.getOrNull()?.let { if (!it.isNullOrBlank()) return it }
-
-        return null
+        // AndroidFacet.getInstance(Module)
+        return runCatching {
+            val getInstance = facetClass.methods.firstOrNull {
+                it.name == "getInstance" && it.parameterCount == 1 &&
+                    it.parameterTypes[0].name == "com.intellij.openapi.module.Module"
+            } ?: return@runCatching null
+            getInstance.invoke(null, module)
+        }.getOrNull()
     }
 
-    fun getSelectedAppVariant(project: Project): VariantSelection? {
-        val appModule = AppModuleLocator.findAppModule(project) ?: return null
-        val variant = getSelectedVariantFromFacet(appModule) ?: return null
-        val modulePath = normalizeModulePath(appModule.name)
-        return VariantSelection(modulePath = modulePath, variant = variant)
+    private fun getIdeaAndroidProject(module: Module): Any? {
+        val facet = getAndroidFacet(module) ?: return null
+        // facet.getIdeaAndroidProject()
+        return runCatching {
+            facet.javaClass.methods.firstOrNull { it.name == "getIdeaAndroidProject" && it.parameterCount == 0 }
+                ?.invoke(facet)
+        }.getOrNull()
     }
 
-    private fun normalizeModulePath(name: String): String =
-        if (name.startsWith(":")) name else ":" + name
+    private fun getGradleAndroidModel(module: Module): Any? {
+    // 这几个是不同 AS 版本的常见位置，尽量全覆盖
+    val candidates = listOf(
+        "com.android.tools.idea.gradle.project.model.AndroidModuleModel",
+        "com.android.tools.idea.gradle.project.model.GradleAndroidModel",
+        "com.android.tools.idea.projectsystem.gradle.GradleAndroidModel",
+        "com.android.tools.idea.projectsystem.gradle.AndroidModuleModel",
+        "com.android.tools.idea.projectsystem.gradle.GradleAndroidModuleModel"
+    )
+
+    for (cn in candidates) {
+        val clazz = runCatching { Class.forName(cn, false, VariantReader::class.java.classLoader) }.getOrNull() ?: continue
+        val getMethod = clazz.methods.firstOrNull {
+            it.name == "get" && it.parameterCount == 1 &&
+                it.parameterTypes[0].name == "com.intellij.openapi.module.Module"
+        } ?: continue
+
+        val model = runCatching { getMethod.invoke(null, module) }.getOrNull()
+        if (model != null) return model
+    }
+    return null
 }
 
-/**
- * 定位 app module。默认名 "app"，若有多 app 请调整 APP_MODULE_NAME。
- */
-object AppModuleLocator {
-    const val APP_MODULE_NAME = "app"
 
-    fun findAppModule(project: Project): Module? {
-        val mm = ModuleManager.getInstance(project)
-        return mm.findModuleByName(APP_MODULE_NAME)
-            ?: mm.modules.firstOrNull { it.name == APP_MODULE_NAME }
-            ?: mm.modules.firstOrNull { it.name.lowercase() == APP_MODULE_NAME }
+    private fun invokeStringGetter(target: Any, methodName: String): String? {
+        return runCatching {
+            val m = target.javaClass.methods.firstOrNull { it.name == methodName && it.parameterCount == 0 } ?: return@runCatching null
+            (m.invoke(target) as? String)?.takeIf { it.isNotBlank() }
+        }.getOrNull()
     }
 }

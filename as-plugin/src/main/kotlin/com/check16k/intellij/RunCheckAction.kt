@@ -6,6 +6,9 @@ import com.check16k.core.Origin
 import com.check16k.core.OriginMatch
 import com.check16k.core.ReportWriter
 import com.check16k.core.ScanReport
+import com.check16k.intellij.variant.VariantReader
+import com.check16k.intellij.variant.VariantSelection
+import com.check16k.intellij.variant.VariantStateService
 import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -13,6 +16,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.module.Module
+import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
@@ -23,10 +28,6 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.openapi.ui.DialogWrapper
-import com.check16k.intellij.variant.VariantStateService
-import com.check16k.intellij.variant.VariantSelection
-import com.intellij.openapi.module.Module
-import com.intellij.openapi.module.ModuleManager
 import com.intellij.ui.SimpleListCellRenderer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -42,7 +43,6 @@ import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.JTextField
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 
@@ -106,48 +106,74 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     var chosenVariant = settings.variantName
                     var chosenAbi = settings.abiFilter
                     var canceled = false
+
                     ApplicationManager.getApplication().invokeAndWait {
                         val svc = project.getService(VariantStateService::class.java)
+                        svc.installListenersOnce()
+                        svc.refreshNow()
+
                         val detected = svc.currentModulePath?.let { mp ->
                             val v = svc.currentVariant
-                            if (!v.isNullOrBlank()) VariantSelection(normalizeModulePath(mp), v) else null
+                            if (!v.isNullOrBlank()) VariantSelection(normalizeGradleModulePath(project, mp), v) else null
                         }
 
+                        // ✅ 模块列表从 settings.gradle 解析，永远是 GradlePath（:app / :xxx:yyy）
                         val androidModules = runReadAction { loadAndroidModules(project, rootDir) }
-                        val moduleShortGuess = shortModuleName(androidModules.firstOrNull()?.modulePath ?: settings.modulePath)
+
+                        val defaultModule = normalizeGradleModulePath(
+                            project,
+                            settings.modulePath.ifBlank {
+                                detected?.modulePath
+                                    ?: svc.guessAppModulePath()
+                                    ?: androidModules.firstOrNull()?.modulePath
+                                    ?: ":app"
+                            }
+                        )
+
+                        val moduleShortGuess = shortModuleName(defaultModule)
                         val variantGuessFromArtifact = guessVariantFromArtifact(artifact.fileName.toString(), moduleShortGuess)
-                        val defaultModule = settings.modulePath.ifBlank {
-                            detected?.modulePath
-                                ?: svc.guessAppModulePath()
-                                ?: androidModules.firstOrNull()?.modulePath
-                                ?: ":app"
-                        }
+
                         val defaultVariant = settings.variantName.ifBlank {
-                            detected?.variant
+                            val ideModule = findIdeModuleByGradlePath(project, defaultModule)
+                            val modelVariant = ideModule?.let { VariantReader.getSelectedVariantFromModels(it) }
+                            val facetVariant = ideModule?.let { VariantReader.getSelectedVariantForModule(it) }
+                            modelVariant
+                                ?: facetVariant
+                                ?: detected?.variant
                                 ?: svc.currentVariant
                                 ?: androidModules.firstOrNull { !it.selectedVariant.isNullOrBlank() }?.selectedVariant
                                 ?: variantGuessFromArtifact
                                 ?: androidModules.firstOrNull()?.variants?.firstOrNull()
                                 ?: "debug"
                         }
+
                         val defaultAbi = settings.abiFilter
 
-                        val dialog = ModuleVariantDialog(project, androidModules, defaultModule, defaultVariant, defaultAbi)
+                        val dialog = ModuleVariantDialog(
+                            project = project,
+                            modules = androidModules,
+                            defaultModule = defaultModule,
+                            defaultVariant = defaultVariant,
+                            defaultAbi = defaultAbi,
+                            logger = { msg -> log(msg) }
+                        )
+
                         if (!dialog.showAndGet()) {
                             canceled = true
                             return@invokeAndWait
                         }
 
-                        chosenModule = normalizeModulePath(dialog.selectedModulePath.ifBlank { defaultModule })
+                        chosenModule = normalizeGradleModulePath(project, dialog.selectedModulePath.ifBlank { defaultModule })
                         chosenVariant = dialog.selectedVariant.ifBlank { defaultVariant }
                         chosenAbi = dialog.selectedAbi.trim()
+
                         settings.modulePath = chosenModule
                         settings.variantName = chosenVariant
                         settings.abiFilter = chosenAbi
                     }
                     if (canceled) return
 
-                    // 3) 扫描产物（先得到 fail/warn 统计）
+                    // 3) 扫描产物
                     indicator.text = "扫描产物..."
                     val scanner = ArchiveScanner(CheckConfig())
                     val baseReport = try {
@@ -160,7 +186,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     }
                     log("产物扫描完成：total=${baseReport.summary.totalSo}, fail=${baseReport.summary.fail}, warn=${baseReport.summary.warn}")
 
-                    // 4) 准备 hash-origins 输出目录
+                    // 4) hash-origins 输出目录
                     val reportDir = File(rootDir, settings.reportDir.ifBlank { "check-result" }).apply { mkdirs() }
                     val hashOriginsJson = File(reportDir, "hash-origins.json")
                     if (hashOriginsJson.exists()) hashOriginsJson.delete()
@@ -168,15 +194,13 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     log("hash-origins output: ${hashOriginsJson.absolutePath}")
 
                     // 5) 执行 Gradle：生成 hash-origins
-                    val gradlew = findGradlew(rootDir)
-                        ?: run {
+                    val gradlew = findGradlew(rootDir) ?: run {
                         notify(project, "16kb-check", "未找到 gradlew：请确认项目根目录存在 ./gradlew", NotificationType.ERROR)
-                            return
-                        }
+                        return
+                    }
                     log("Gradlew: ${gradlew.absolutePath}")
 
-                    // 选取 module / variant / abi：弹窗结果 + 兜底提示
-                    val modulePath = normalizeModulePath(chosenModule.ifBlank { ":app" })
+                    val modulePath = normalizeGradleModulePath(project, chosenModule.ifBlank { ":app" })
                     val mergeVariantName = chosenVariant.ifBlank { variantFromArtifact }
                     val abiFilter = chosenAbi.trim()
                     log("Selected module/variant: module=$modulePath, variant=$mergeVariantName, abi=${if (abiFilter.isBlank()) "all" else abiFilter}")
@@ -304,24 +328,15 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         } catch (_: Throwable) { }
                     }
 
-                    // 6) 读取 hash-origins，构建 sha -> Origin 映射
-                    val hashOriginsMap = if (hashOriginsOk) {
-                        parseHashOrigins(hashOriginsJson)
-                    } else {
-                        emptyMap()
-                    }
-                    if (hashOriginsMap.isNotEmpty()) {
-                        log("hash-origins 解析完成：${hashOriginsMap.size} 个 sha 匹配到来源")
-                    } else {
-                        log("hash-origins 为空或解析失败，将输出基础报告")
-                    }
+                    // 6) 读取 hash-origins
+                    val hashOriginsMap = if (hashOriginsOk) parseHashOrigins(hashOriginsJson) else emptyMap()
+                    if (hashOriginsMap.isNotEmpty()) log("hash-origins 解析完成：${hashOriginsMap.size} 个 sha 匹配到来源")
+                    else log("hash-origins 为空或解析失败，将输出基础报告")
 
-                    // 7) 合并来源信息，输出报告
+                    // 7) 输出报告
                     val finalReport: ScanReport = if (hashOriginsMap.isNotEmpty()) {
                         enrichReportWithOrigins(baseReport, hashOriginsMap)
-                    } else {
-                        baseReport
-                    }
+                    } else baseReport
 
                     val variantNameForReport = finalReport.variant ?: variantFromArtifact
                     val jsonOut = reportDir.toPath().resolve("$variantNameForReport.json")
@@ -356,6 +371,10 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             }
         )
     }
+
+    // ------------------------
+    // Report/origin helpers（保留你原逻辑）
+    // ------------------------
 
     private fun enrichReportWithOrigins(
         report: ScanReport,
@@ -407,7 +426,6 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         if (!depId.isNullOrBlank()) {
             val parts = depId.split(":")
             if (parts.size == 3) {
-                // 优先用 path 便于可读；无法取到 path 时退回 Maven 信息
                 if (!path.isNullOrBlank()) return Origin.File("${depId} | $path")
                 return Origin.Maven(parts[0], parts[1], parts[2])
             }
@@ -420,14 +438,14 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             }
         }
 
-        if (!path.isNullOrBlank()) {
-            return Origin.File(path)
-        }
-        if (!projectPath.isNullOrBlank()) {
-            return Origin.Project(projectPath, source = "merged_native_libs")
-        }
+        if (!path.isNullOrBlank()) return Origin.File(path)
+        if (!projectPath.isNullOrBlank()) return Origin.Project(projectPath, source = "merged_native_libs")
         return Origin.Unknown
     }
+
+    // ------------------------
+    // Artifact / Gradle helpers
+    // ------------------------
 
     private fun findLatestArtifact(base: Path, maxDepth: Int = 8): Path? {
         return try {
@@ -466,99 +484,57 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         group.createNotification(title, content, type).notify(project)
     }
 
+    // ------------------------
+    // Module / variant discovery（✅核心修复点）
+    // ------------------------
+
     private data class AndroidModuleEntry(
-        val modulePath: String,
+        val modulePath: String,     // 永远是 GradlePath: :app / :feature:xxx
         val variants: List<String>,
         val selectedVariant: String?
     )
 
+    /**
+     * ✅ 不再用 Module.name 当 modulePath
+     * ✅ 从 settings.gradle(.kts) 解析 include 的 GradlePath
+     */
     private fun loadAndroidModules(project: Project, rootDir: File?): List<AndroidModuleEntry> {
-        val moduleManager = ModuleManager.getInstance(project)
-        val getInfo = getAndroidModelGetMethod()
-        if (getInfo == null) {
-            // Android plugin不可用，返回普通模块列表以便用户手填
-            return moduleManager.modules
-                .filterNot { isTestModule(it.name) }
-                .map {
-                    val path = normalizeModulePath(":" + it.name)
-                    AndroidModuleEntry(path, discoverVariantsFromDisk(rootDir, path), null)
-                }
-        }
+        val gradlePaths = rootDir?.let { loadGradleModulePathsFromSettings(it) }.orEmpty()
+        val paths = if (gradlePaths.isNotEmpty()) gradlePaths else listOf(":app")
 
-        val (getMethod, modelClass) = getInfo
+        return paths.map { gradlePath ->
+            val modulePath = normalizeGradleModulePath(project, gradlePath)
 
-        val variantNameReader: (Any) -> String? = { variant ->
-            runCatching {
-                variant.javaClass.methods.firstOrNull { it.name == "getName" }?.invoke(variant) as? String
-            }.getOrNull()
-        }
+            val ideModule = findIdeModuleByGradlePath(project, modulePath)
+            val selectedVariant = ideModule?.let { VariantReader.getSelectedVariantFromModels(it) }
+                ?: ideModule?.let { VariantReader.getSelectedVariantForModule(it) }
 
-        val variantListReader: (Any) -> List<String> = { model ->
-            val variants = mutableListOf<String>()
-            listOf(
-                "getVariantNames", "getAllVariantNames",
-                "getVariants", "getAllVariants"
-            ).forEach { mName ->
-                val m = model.javaClass.methods.firstOrNull { it.name == mName }
-                if (m != null) {
-                    val result = runCatching { m.invoke(model) }.getOrNull()
-                    when (result) {
-                        is Iterable<*> -> result.forEach { v ->
-                            if (v is String) variants.add(v)
-                            else if (v != null) variantNameReader(v)?.let { variants.add(it) }
-                        }
-                        is Array<*> -> result.forEach { v ->
-                            if (v is String) variants.add(v)
-                            else if (v != null) variantNameReader(v)?.let { variants.add(it) }
-                        }
-                    }
-                }
-            }
-            variants.distinct()
-        }
+            val diskVariants = discoverVariantsFromDisk(rootDir, modulePath)
+            val variants = diskVariants.distinct().ifEmpty { listOf("debug", "release") }
 
-        return moduleManager.modules.mapNotNull { module ->
-            if (isTestModule(module.name)) return@mapNotNull null
-            val model = runCatching { getMethod.invoke(null, module) }.getOrNull() ?: return@mapNotNull null
-            val modulePathRaw = runCatching {
-                model.javaClass.methods.firstOrNull { it.name == "getModulePath" }?.invoke(model) as? String
-            }.getOrNull()
-            val modulePath = normalizeModulePath(modulePathRaw ?: ":" + module.name)
-            val selectedVariant = runCatching {
-                readSelectedVariant(model, modelClass)
-            }.getOrNull()
-            val variants = (variantListReader(model) + discoverVariantsFromDisk(rootDir, modulePath))
-                .distinct()
-                .ifEmpty { listOf("debug", "release") }
-            AndroidModuleEntry(modulePath, variants, selectedVariant)
+            AndroidModuleEntry(
+                modulePath = modulePath,
+                variants = variants,
+                selectedVariant = selectedVariant
+            )
         }.sortedBy { it.modulePath }
     }
 
-    private fun getAndroidModelGetMethod(): Pair<java.lang.reflect.Method, Class<*>>? {
-        val candidates = listOf(
-            "com.android.tools.idea.gradle.project.model.AndroidModuleModel",
-            "com.android.tools.idea.gradle.project.model.GradleAndroidModel"
-        )
-        candidates.forEach { name ->
-            val clazz = runCatching { Class.forName(name, false, javaClass.classLoader) }.getOrNull()
-            if (clazz != null) {
-                val getMethod = clazz.methods.firstOrNull {
-                    it.name == "get" && it.parameterCount == 1 && Module::class.java.isAssignableFrom(it.parameterTypes[0])
-                }
-                if (getMethod != null) return getMethod to clazz
-            }
-        }
-        return null
-    }
+    private fun loadGradleModulePathsFromSettings(rootDir: File): List<String> {
+        val f = listOf(
+            File(rootDir, "settings.gradle.kts"),
+            File(rootDir, "settings.gradle")
+        ).firstOrNull { it.exists() && it.isFile } ?: return emptyList()
 
-    private fun readSelectedVariant(model: Any, modelClass: Class<*>): String? {
-        runCatching { modelClass.methods.firstOrNull { it.name == "getSelectedVariantName" }?.invoke(model) as? String }
-            .getOrNull()?.let { if (it.isNotBlank()) return it }
-        runCatching {
-            val v = modelClass.methods.firstOrNull { it.name == "getSelectedVariant" }?.invoke(model)
-            if (v != null) v.javaClass.methods.firstOrNull { it.name == "getName" }?.invoke(v) as? String else null
-        }.getOrNull()?.let { if (!it.isNullOrBlank()) return it }
-        return null
+        val text = runCatching { f.readText(Charsets.UTF_8) }.getOrNull() ?: return emptyList()
+
+        // 抓取 ':a:b' 形式
+        val r = Regex("""['"](:[A-Za-z0-9_\-:]+)['"]""")
+        return r.findAll(text)
+            .map { it.groupValues[1] }
+            .distinct()
+            .sorted()
+            .toList()
     }
 
     private fun discoverVariantsFromDisk(rootDir: File?, modulePath: String): List<String> {
@@ -570,24 +546,60 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         return merged.listFiles()?.filter { it.isDirectory }?.map { it.name }?.filter { it.isNotBlank() } ?: emptyList()
     }
 
-    private fun isTestModule(name: String?): Boolean {
-        if (name.isNullOrBlank()) return false
-        val lower = name.lowercase()
-        return lower.contains("test") && !lower.contains("contest")
+    /**
+     * ✅ 关键：净化输入，只允许输出 GradlePath
+     * - "bayarlah_vietnam.app" -> ":app"
+     * - ":bayarlah_vietnam.app" -> ":app"
+     * - "app" -> ":app"
+     * - ":feature:app" 保留
+     * - ":bayarlah_vietnam"（工程名误入）-> ":app"
+     */
+    private fun normalizeGradleModulePath(project: Project, raw: String?): String {
+        if (raw.isNullOrBlank()) return ":app"
+
+        var s = raw.trim()
+        s = s.removePrefix(":")
+
+        // IDE module name: bayarlah_vietnam.app
+        if (s.contains('.') && !s.contains(':')) {
+            s = s.substringAfterLast('.')
+        }
+
+        // 工程名误入
+        if (s == project.name) {
+            s = "app"
+        }
+
+        return if (s.startsWith(":")) s else ":$s"
     }
 
-    private fun normalizeModulePath(path: String?): String {
-        if (path.isNullOrBlank()) return ":app"
-        // 处理类似 "root.app" 或 "root:app" 形式，保留末尾段作为 module
-        val trimmed = path.trim()
-        val parts = trimmed.split(':', '.').filter { it.isNotBlank() }
-        val tail = parts.lastOrNull() ?: trimmed
-        return if (tail.startsWith(":")) tail else ":" + tail
+    /**
+     * ✅ 用 Facet 反射取 GradlePath 精确匹配 IDE Module
+     * 找不到再做兜底：endsWith(".app") / name=="app" / 尾段匹配
+     */
+    private fun findIdeModuleByGradlePath(project: Project, gradlePathRaw: String): Module? {
+        val target = normalizeGradleModulePath(project, gradlePathRaw)
+
+        val mm = ModuleManager.getInstance(project)
+        val modules = mm.modules
+
+        // 1) 精确：Facet 里能拿到 modulePath/gradlePath 的，直接比对（最稳）
+        modules.firstOrNull { m ->
+            val facetModulePath = VariantReader.getFacetModulePath(m)
+            facetModulePath != null && facetModulePath == target
+        }?.let { return it }
+
+        // 2) 兜底：常见命名 app / xxx.app
+        val tail = target.substringAfterLast(":")
+        modules.firstOrNull { it.name == tail }?.let { return it }
+        modules.firstOrNull { it.name.endsWith(".$tail") }?.let { return it }
+
+        // 3) 最后：弱匹配
+        return modules.firstOrNull { (":" + it.name).endsWith(target) }
     }
 
     private fun guessVariantFromArtifact(fileName: String, moduleShort: String?): String? {
         val base = fileName.substringBeforeLast(".")
-        // 如 app-mobile-prodApp-debug.apk -> mobileProdAppDebug
         var name = base
         if (!moduleShort.isNullOrBlank() && base.startsWith(moduleShort)) {
             name = base.removePrefix(moduleShort).trimStart('-', '_')
@@ -599,12 +611,17 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         return (first + rest)
     }
 
+    // ------------------------
+    // Dialog
+    // ------------------------
+
     private class ModuleVariantDialog(
-        project: Project,
-        modules: List<AndroidModuleEntry>,
-        defaultModule: String,
-        defaultVariant: String,
-        defaultAbi: String
+        private val project: Project,
+        private val modules: List<AndroidModuleEntry>,
+        private val defaultModule: String,
+        private val defaultVariant: String,
+        private val defaultAbi: String,
+        private val logger: (String) -> Unit
     ) : DialogWrapper(project, true) {
 
         private val moduleCombo = JComboBox<ModuleComboItem>()
@@ -634,19 +651,45 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             }
             moduleCombo.selectedItem = ModuleComboItem(defaultModule)
 
-            fun refreshVariants(modulePath: String?) {
+            fun refreshVariants(modulePathRaw: String?) {
+                logger("Refreshing variants for moduleRaw=$modulePathRaw")
                 variantCombo.removeAllItems()
+
+                val modulePath = if (modulePathRaw.isNullOrBlank()) defaultModule else modulePathRaw
                 val entry = modules.firstOrNull { it.modulePath == modulePath }
-                val variants = entry?.variants?.takeIf { it.isNotEmpty() } ?: emptyList()
-                variants.forEach { variantCombo.addItem(it) }
-                if (variantCombo.itemCount == 0) {
-                    variantCombo.addItem(defaultVariant)
+                logger("Module entry variants=${entry?.variants?.joinToString() ?: "[]"}, selected=${entry?.selectedVariant}")
+
+                val candidates = LinkedHashSet<String>()
+                candidates.addAll(entry?.variants.orEmpty())
+
+                val ideModule = runCatching { findIdeModuleByGradlePath(project, modulePath) }.getOrNull()
+                val modelVariant = ideModule?.let { VariantReader.getSelectedVariantFromModels(it) }
+                val facetVariant = ideModule?.let { VariantReader.getSelectedVariantForModule(it) }
+                logger("Variant lookup => targetGradlePath=$modulePath, ideModule=${ideModule?.name}, modelVariant=$modelVariant, facetVariant=$facetVariant")
+
+                val selected = modelVariant?.takeIf { it.isNotBlank() }
+                    ?: facetVariant?.takeIf { it.isNotBlank() }
+                    ?: entry?.selectedVariant?.takeIf { !it.isNullOrBlank() }
+                    ?: defaultVariant
+
+                if (candidates.isEmpty()) {
+                    candidates.add(defaultVariant)
+                    candidates.add("debug")
+                    candidates.add("release")
                 }
-                variantCombo.selectedItem = entry?.selectedVariant ?: defaultVariant
+
+                if (!selected.isNullOrBlank()) candidates.add(selected)
+
+                candidates.forEach { variantCombo.addItem(it) }
+                variantCombo.selectedItem = selected
+                logger("Variants after refresh: ${candidates.joinToString()} | selected=$selected")
             }
 
             refreshVariants(defaultModule)
-            moduleCombo.addActionListener { refreshVariants((moduleCombo.selectedItem as? ModuleComboItem)?.value) }
+            moduleCombo.addActionListener {
+                val mp = (moduleCombo.selectedItem as? ModuleComboItem)?.value
+                refreshVariants(mp)
+            }
 
             listOf("", "arm64-v8a", "armeabi-v7a", "x86_64", "x86").forEach { abiCombo.addItem(it) }
             if (defaultAbi.isNotBlank() && (0 until abiCombo.itemCount).none { defaultAbi == abiCombo.getItemAt(it) }) {
@@ -696,6 +739,22 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             panel.add(infoLabel, gbc)
 
             return panel
+        }
+
+        private fun findIdeModuleByGradlePath(project: Project, gradlePath: String): Module? {
+            // 复用外部同名逻辑（这里写一份简单调用，避免 inner class 访问权限问题）
+            val target = if (gradlePath.startsWith(":")) gradlePath else ":$gradlePath"
+            val modules = ModuleManager.getInstance(project).modules
+
+            modules.firstOrNull { m ->
+                val p = VariantReader.getFacetModulePath(m)
+                p != null && p == target
+            }?.let { return it }
+
+            val tail = target.substringAfterLast(":")
+            modules.firstOrNull { it.name == tail }?.let { return it }
+            modules.firstOrNull { it.name.endsWith(".$tail") }?.let { return it }
+            return modules.firstOrNull { (":" + it.name).endsWith(target) }
         }
     }
 

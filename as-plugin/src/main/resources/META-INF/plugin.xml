@@ -8,6 +8,9 @@
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.gradle</depends>
     <depends>com.intellij.modules.androidstudio</depends>
+    <depends>org.jetbrains.android</depends>
+    <depends optional="true">com.android.tools.idea.gradle</depends>
+
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="check16k.notifications" displayType="BALLOON" isLogByDefault="true"/>
