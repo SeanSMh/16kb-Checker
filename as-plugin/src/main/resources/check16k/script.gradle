@@ -8,9 +8,8 @@ def TARGET_MODULE = '__TARGET_MODULE__'
 def VARIANT = '__VARIANT__'
 def ABI_FILTER = '__ABI_FILTER__'?.trim()
 def ALLOWED_ABI = (ABI_FILTER ?: "").split(",").collect { it.trim() }.findAll { it } as Set
-L("init vars -> module=" + TARGET_MODULE + ", variant=" + VARIANT + ", abiFilter=" + (ALLOWED_ABI.isEmpty() ? "ALL" : ALLOWED_ABI.join(',')))
-
 def L = { msg -> logger.lifecycle("[16KB][init] " + msg) }
+L("init vars -> module=" + TARGET_MODULE + ", variant=" + VARIANT + ", abiFilter=" + (ALLOWED_ABI.isEmpty() ? "ALL" : ALLOWED_ABI.join(',')))
 
 def nowIso() {
     try { return java.time.OffsetDateTime.now().toString() } catch (Throwable ignore) { return null }
