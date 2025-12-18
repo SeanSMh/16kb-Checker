@@ -7,13 +7,15 @@ object InitScriptProvider {
     fun buildInitScript(
         outputJsonAbsPath: String,
         modulePath: String,
-        variantName: String
+        variantName: String,
+        abiFilter: String
     ): String {
         val template = loadInitScriptTemplate()
         return template
             .replace("__OUT_JSON_ABS_PATH__", escapeForGroovySingleQuoted(outputJsonAbsPath))
             .replace("__TARGET_MODULE__", escapeForGroovySingleQuoted(modulePath))
             .replace("__VARIANT__", escapeForGroovySingleQuoted(variantName))
+            .replace("__ABI_FILTER__", escapeForGroovySingleQuoted(abiFilter))
     }
 
     private fun loadInitScriptTemplate(): String {

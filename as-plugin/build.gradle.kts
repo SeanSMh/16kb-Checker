@@ -26,8 +26,8 @@ dependencies {
 
 tasks {
     patchPluginXml {
-        // 与 Android Studio 当前使用的 252.* 平台对齐，避免版本不兼容提示
-        sinceBuild.set("252")
+        // 兼容 231+（Android Studio 基于 231，亦兼容更高版本）
+        sinceBuild.set("231")
         untilBuild.set("252.*")
         pluginDescription.set("16kb-check: run check16k Gradle tasks and view reports (with origin attribution).")
     }

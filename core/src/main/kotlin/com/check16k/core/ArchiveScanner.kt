@@ -12,7 +12,8 @@ class ArchiveScanner(private val config: CheckConfig = CheckConfig()) {
     fun scan(
         artifact: Path,
         variant: String? = null,
-        hashOrigins: Map<String, List<Origin>> = emptyMap()
+        hashOrigins: Map<String, List<Origin>> = emptyMap(),
+        abiFilter: Set<String> = emptySet()
     ): ScanReport {
         val archivePath = artifact.toAbsolutePath().toString()
         val entryInfo = ZipCentralDirectory.readEntries(archivePath)
@@ -30,6 +31,7 @@ class ArchiveScanner(private val config: CheckConfig = CheckConfig()) {
 
             infos.forEach { info ->
                 val match = matchSo(info.name) ?: return@forEach
+                if (abiFilter.isNotEmpty() && !abiFilter.contains(match.abi)) return@forEach
                 val entry = zip.getEntry(info.name) ?: return@forEach
                 val bytes = zip.getInputStream(entry).use { it.readAllBytesSafe() }
                 val sha256 = Hashing.sha256(bytes)

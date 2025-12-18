@@ -6,6 +6,9 @@ if (OUT_FILE.exists()) OUT_FILE.delete()
 
 def TARGET_MODULE = '__TARGET_MODULE__'
 def VARIANT = '__VARIANT__'
+def ABI_FILTER = '__ABI_FILTER__'?.trim()
+def ALLOWED_ABI = (ABI_FILTER ?: "").split(",").collect { it.trim() }.findAll { it } as Set
+L("init vars -> module=" + TARGET_MODULE + ", variant=" + VARIANT + ", abiFilter=" + (ALLOWED_ABI.isEmpty() ? "ALL" : ALLOWED_ABI.join(',')))
 
 def L = { msg -> logger.lifecycle("[16KB][init] " + msg) }
 
@@ -53,6 +56,12 @@ def guessAbiFromPath = { String path ->
     return null
 }
 
+def shouldKeepAbi = { String abi ->
+    if (ALLOWED_ABI == null || ALLOWED_ABI.isEmpty()) return true
+    if (abi == null) return false
+    return ALLOWED_ABI.contains(abi)
+}
+
 /** 1) merged_native_libs：最终产物 so 列表 */
 def scanMergedNativeLibs = { Project p, String variant ->
     def base = new File(p.buildDir, "intermediates/merged_native_libs/" + variant + "/out/lib")
@@ -65,6 +74,7 @@ def scanMergedNativeLibs = { Project p, String variant ->
         def sha = sha256File(f)
         def rel = safeRelPath(p.rootProject.projectDir, f)
         def abi = guessAbiFromPath(rel)
+        if (!shouldKeepAbi(abi)) return
         addItem([
             sha256: sha,
             soName: f.name,
@@ -92,6 +102,7 @@ def scanLocalJniLibs = { Project p ->
         def sha = sha256File(f)
         def rel = safeRelPath(p.rootProject.projectDir, f)
         def abi = guessAbiFromPath(rel)
+        if (!shouldKeepAbi(abi)) return
         addItem([
             sha256: sha,
             soName: f.name,
@@ -287,6 +298,7 @@ gradle.buildFinished { result ->
     sb.append("\"generatedAt\":").append(jsonEscape(nowIso())).append(",")
     sb.append("\"module\":").append(jsonEscape(TARGET_MODULE)).append(",")
     sb.append("\"variant\":").append(jsonEscape(VARIANT)).append(",")
+    sb.append("\"abiFilter\":").append(ALLOWED_ABI == null || ALLOWED_ABI.isEmpty() ? "null" : jsonEscape(ALLOWED_ABI.join(','))).append(",")
     sb.append("\"items\":[")
     for (int i = 0; i < items.size(); i++) {
         def item = items[i]

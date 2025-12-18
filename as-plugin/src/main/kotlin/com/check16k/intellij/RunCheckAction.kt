@@ -22,6 +22,12 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFileManager
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.openapi.ui.DialogWrapper
+import com.check16k.intellij.variant.VariantStateService
+import com.check16k.intellij.variant.VariantSelection
+import com.intellij.openapi.module.Module
+import com.intellij.openapi.module.ModuleManager
+import com.intellij.ui.SimpleListCellRenderer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -32,6 +38,11 @@ import java.io.InputStreamReader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import javax.swing.JComboBox
+import javax.swing.JComponent
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JTextField
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 
@@ -39,7 +50,8 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
-        val settings = Check16kSettingsState.getInstance(project).state
+        val settingsComponent = Check16kSettingsState.getInstance(project)
+        val settings = settingsComponent.state
 
         ProgressManager.getInstance().run(
             object : Task.Backgroundable(project, "16kb-check - Scan APK/AAB + SO Origins", true) {
@@ -89,11 +101,58 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     val variantFromArtifact = artifact.fileName.toString().substringBeforeLast(".")
                     log("Artifact: ${artifact.toAbsolutePath()} (variant=$variantFromArtifact)")
 
+                    // 2.1) 弹窗选择 module/variant/abi（需在 EDT）
+                    var chosenModule = settings.modulePath
+                    var chosenVariant = settings.variantName
+                    var chosenAbi = settings.abiFilter
+                    var canceled = false
+                    ApplicationManager.getApplication().invokeAndWait {
+                        val svc = project.getService(VariantStateService::class.java)
+                        val detected = svc.currentModulePath?.let { mp ->
+                            val v = svc.currentVariant
+                            if (!v.isNullOrBlank()) VariantSelection(normalizeModulePath(mp), v) else null
+                        }
+
+                        val androidModules = runReadAction { loadAndroidModules(project, rootDir) }
+                        val moduleShortGuess = shortModuleName(androidModules.firstOrNull()?.modulePath ?: settings.modulePath)
+                        val variantGuessFromArtifact = guessVariantFromArtifact(artifact.fileName.toString(), moduleShortGuess)
+                        val defaultModule = settings.modulePath.ifBlank {
+                            detected?.modulePath
+                                ?: svc.guessAppModulePath()
+                                ?: androidModules.firstOrNull()?.modulePath
+                                ?: ":app"
+                        }
+                        val defaultVariant = settings.variantName.ifBlank {
+                            detected?.variant
+                                ?: svc.currentVariant
+                                ?: androidModules.firstOrNull { !it.selectedVariant.isNullOrBlank() }?.selectedVariant
+                                ?: variantGuessFromArtifact
+                                ?: androidModules.firstOrNull()?.variants?.firstOrNull()
+                                ?: "debug"
+                        }
+                        val defaultAbi = settings.abiFilter
+
+                        val dialog = ModuleVariantDialog(project, androidModules, defaultModule, defaultVariant, defaultAbi)
+                        if (!dialog.showAndGet()) {
+                            canceled = true
+                            return@invokeAndWait
+                        }
+
+                        chosenModule = normalizeModulePath(dialog.selectedModulePath.ifBlank { defaultModule })
+                        chosenVariant = dialog.selectedVariant.ifBlank { defaultVariant }
+                        chosenAbi = dialog.selectedAbi.trim()
+                        settings.modulePath = chosenModule
+                        settings.variantName = chosenVariant
+                        settings.abiFilter = chosenAbi
+                    }
+                    if (canceled) return
+
                     // 3) 扫描产物（先得到 fail/warn 统计）
                     indicator.text = "扫描产物..."
                     val scanner = ArchiveScanner(CheckConfig())
                     val baseReport = try {
-                        scanner.scan(artifact, variantFromArtifact, emptyMap())
+                        val abiSet = chosenAbi.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                        scanner.scan(artifact, variantFromArtifact, emptyMap(), abiSet)
                     } catch (t: Throwable) {
                         err("扫描 APK/AAB 失败：${t.message}")
                         notify(project, "16kb-check", "扫描 APK/AAB 失败：${t.message}", NotificationType.ERROR)
@@ -116,11 +175,13 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         }
                     log("Gradlew: ${gradlew.absolutePath}")
 
-                    // ======= 目前仍写死 module / variant（后续可 UI 配置化） =======
-                    val modulePath = ":app"
-                    val mergeVariantName = "mobileProdAppDebug"
+                    // 选取 module / variant / abi：弹窗结果 + 兜底提示
+                    val modulePath = normalizeModulePath(chosenModule.ifBlank { ":app" })
+                    val mergeVariantName = chosenVariant.ifBlank { variantFromArtifact }
+                    val abiFilter = chosenAbi.trim()
+                    log("Selected module/variant: module=$modulePath, variant=$mergeVariantName, abi=${if (abiFilter.isBlank()) "all" else abiFilter}")
+
                     val mergeTask = "${modulePath}:merge${mergeVariantName.replaceFirstChar { it.uppercase() }}NativeLibs"
-                    // ======================================================================
 
                     val baseCache = File(PathManager.getSystemPath(), "16kb-check")
                     val projectKey = FileUtil.sanitizeFileName(project.name)
@@ -130,7 +191,8 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     val scriptText = InitScriptProvider.buildInitScript(
                         outputJsonAbsPath = hashOriginsJson.absolutePath,
                         modulePath = modulePath,
-                        variantName = mergeVariantName
+                        variantName = mergeVariantName,
+                        abiFilter = abiFilter
                     )
 
                     indicator.text = "Writing init-script..."
@@ -404,6 +466,253 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         group.createNotification(title, content, type).notify(project)
     }
 
+    private data class AndroidModuleEntry(
+        val modulePath: String,
+        val variants: List<String>,
+        val selectedVariant: String?
+    )
+
+    private fun loadAndroidModules(project: Project, rootDir: File?): List<AndroidModuleEntry> {
+        val moduleManager = ModuleManager.getInstance(project)
+        val getInfo = getAndroidModelGetMethod()
+        if (getInfo == null) {
+            // Android plugin不可用，返回普通模块列表以便用户手填
+            return moduleManager.modules
+                .filterNot { isTestModule(it.name) }
+                .map {
+                    val path = normalizeModulePath(":" + it.name)
+                    AndroidModuleEntry(path, discoverVariantsFromDisk(rootDir, path), null)
+                }
+        }
+
+        val (getMethod, modelClass) = getInfo
+
+        val variantNameReader: (Any) -> String? = { variant ->
+            runCatching {
+                variant.javaClass.methods.firstOrNull { it.name == "getName" }?.invoke(variant) as? String
+            }.getOrNull()
+        }
+
+        val variantListReader: (Any) -> List<String> = { model ->
+            val variants = mutableListOf<String>()
+            listOf(
+                "getVariantNames", "getAllVariantNames",
+                "getVariants", "getAllVariants"
+            ).forEach { mName ->
+                val m = model.javaClass.methods.firstOrNull { it.name == mName }
+                if (m != null) {
+                    val result = runCatching { m.invoke(model) }.getOrNull()
+                    when (result) {
+                        is Iterable<*> -> result.forEach { v ->
+                            if (v is String) variants.add(v)
+                            else if (v != null) variantNameReader(v)?.let { variants.add(it) }
+                        }
+                        is Array<*> -> result.forEach { v ->
+                            if (v is String) variants.add(v)
+                            else if (v != null) variantNameReader(v)?.let { variants.add(it) }
+                        }
+                    }
+                }
+            }
+            variants.distinct()
+        }
+
+        return moduleManager.modules.mapNotNull { module ->
+            if (isTestModule(module.name)) return@mapNotNull null
+            val model = runCatching { getMethod.invoke(null, module) }.getOrNull() ?: return@mapNotNull null
+            val modulePathRaw = runCatching {
+                model.javaClass.methods.firstOrNull { it.name == "getModulePath" }?.invoke(model) as? String
+            }.getOrNull()
+            val modulePath = normalizeModulePath(modulePathRaw ?: ":" + module.name)
+            val selectedVariant = runCatching {
+                readSelectedVariant(model, modelClass)
+            }.getOrNull()
+            val variants = (variantListReader(model) + discoverVariantsFromDisk(rootDir, modulePath))
+                .distinct()
+                .ifEmpty { listOf("debug", "release") }
+            AndroidModuleEntry(modulePath, variants, selectedVariant)
+        }.sortedBy { it.modulePath }
+    }
+
+    private fun getAndroidModelGetMethod(): Pair<java.lang.reflect.Method, Class<*>>? {
+        val candidates = listOf(
+            "com.android.tools.idea.gradle.project.model.AndroidModuleModel",
+            "com.android.tools.idea.gradle.project.model.GradleAndroidModel"
+        )
+        candidates.forEach { name ->
+            val clazz = runCatching { Class.forName(name, false, javaClass.classLoader) }.getOrNull()
+            if (clazz != null) {
+                val getMethod = clazz.methods.firstOrNull {
+                    it.name == "get" && it.parameterCount == 1 && Module::class.java.isAssignableFrom(it.parameterTypes[0])
+                }
+                if (getMethod != null) return getMethod to clazz
+            }
+        }
+        return null
+    }
+
+    private fun readSelectedVariant(model: Any, modelClass: Class<*>): String? {
+        runCatching { modelClass.methods.firstOrNull { it.name == "getSelectedVariantName" }?.invoke(model) as? String }
+            .getOrNull()?.let { if (it.isNotBlank()) return it }
+        runCatching {
+            val v = modelClass.methods.firstOrNull { it.name == "getSelectedVariant" }?.invoke(model)
+            if (v != null) v.javaClass.methods.firstOrNull { it.name == "getName" }?.invoke(v) as? String else null
+        }.getOrNull()?.let { if (!it.isNullOrBlank()) return it }
+        return null
+    }
+
+    private fun discoverVariantsFromDisk(rootDir: File?, modulePath: String): List<String> {
+        if (rootDir == null) return emptyList()
+        val rel = modulePath.removePrefix(":").split(':').filter { it.isNotBlank() }.joinToString(File.separator)
+        val moduleDir = File(rootDir, rel)
+        val merged = File(moduleDir, "build/intermediates/merged_native_libs")
+        if (!merged.exists() || !merged.isDirectory) return emptyList()
+        return merged.listFiles()?.filter { it.isDirectory }?.map { it.name }?.filter { it.isNotBlank() } ?: emptyList()
+    }
+
+    private fun isTestModule(name: String?): Boolean {
+        if (name.isNullOrBlank()) return false
+        val lower = name.lowercase()
+        return lower.contains("test") && !lower.contains("contest")
+    }
+
+    private fun normalizeModulePath(path: String?): String {
+        if (path.isNullOrBlank()) return ":app"
+        // 处理类似 "root.app" 或 "root:app" 形式，保留末尾段作为 module
+        val trimmed = path.trim()
+        val parts = trimmed.split(':', '.').filter { it.isNotBlank() }
+        val tail = parts.lastOrNull() ?: trimmed
+        return if (tail.startsWith(":")) tail else ":" + tail
+    }
+
+    private fun guessVariantFromArtifact(fileName: String, moduleShort: String?): String? {
+        val base = fileName.substringBeforeLast(".")
+        // 如 app-mobile-prodApp-debug.apk -> mobileProdAppDebug
+        var name = base
+        if (!moduleShort.isNullOrBlank() && base.startsWith(moduleShort)) {
+            name = base.removePrefix(moduleShort).trimStart('-', '_')
+        }
+        val tokens = name.split('-', '_').filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return null
+        val first = tokens.first().replaceFirstChar { it.lowercaseChar() }
+        val rest = tokens.drop(1).joinToString("") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+        return (first + rest)
+    }
+
+    private class ModuleVariantDialog(
+        project: Project,
+        modules: List<AndroidModuleEntry>,
+        defaultModule: String,
+        defaultVariant: String,
+        defaultAbi: String
+    ) : DialogWrapper(project, true) {
+
+        private val moduleCombo = JComboBox<ModuleComboItem>()
+        private val variantCombo = JComboBox<String>()
+        private val abiCombo = JComboBox<String>()
+        private val infoLabel = JLabel("可编辑：直接输入 module/variant/abi，或从下拉选择")
+
+        val selectedModulePath: String
+            get() = (moduleCombo.selectedItem as? ModuleComboItem)?.value?.trim().orEmpty()
+        val selectedVariant: String
+            get() = variantCombo.selectedItem?.toString()?.trim().orEmpty()
+        val selectedAbi: String
+            get() = abiCombo.selectedItem?.toString()?.trim().orEmpty()
+
+        init {
+            title = "选择 Module / Variant / ABI"
+            moduleCombo.isEditable = true
+            variantCombo.isEditable = true
+            abiCombo.isEditable = true
+
+            modules.forEach { moduleCombo.addItem(ModuleComboItem(it.modulePath)) }
+            if (moduleCombo.itemCount == 0) {
+                moduleCombo.addItem(ModuleComboItem(defaultModule))
+            }
+            moduleCombo.renderer = SimpleListCellRenderer.create<ModuleComboItem> { label, value, _ ->
+                label.text = value?.display ?: value?.value ?: ""
+            }
+            moduleCombo.selectedItem = ModuleComboItem(defaultModule)
+
+            fun refreshVariants(modulePath: String?) {
+                variantCombo.removeAllItems()
+                val entry = modules.firstOrNull { it.modulePath == modulePath }
+                val variants = entry?.variants?.takeIf { it.isNotEmpty() } ?: emptyList()
+                variants.forEach { variantCombo.addItem(it) }
+                if (variantCombo.itemCount == 0) {
+                    variantCombo.addItem(defaultVariant)
+                }
+                variantCombo.selectedItem = entry?.selectedVariant ?: defaultVariant
+            }
+
+            refreshVariants(defaultModule)
+            moduleCombo.addActionListener { refreshVariants((moduleCombo.selectedItem as? ModuleComboItem)?.value) }
+
+            listOf("", "arm64-v8a", "armeabi-v7a", "x86_64", "x86").forEach { abiCombo.addItem(it) }
+            if (defaultAbi.isNotBlank() && (0 until abiCombo.itemCount).none { defaultAbi == abiCombo.getItemAt(it) }) {
+                abiCombo.addItem(defaultAbi)
+            }
+            abiCombo.selectedItem = defaultAbi
+
+            init()
+        }
+
+        override fun createCenterPanel(): JComponent {
+            val panel = JPanel(java.awt.GridBagLayout())
+            val gbc = java.awt.GridBagConstraints().apply {
+                fill = java.awt.GridBagConstraints.HORIZONTAL
+                gridx = 0
+                gridy = 0
+                weightx = 0.0
+                insets = java.awt.Insets(6, 6, 6, 6)
+            }
+
+            panel.add(JLabel("Module:"), gbc)
+            gbc.gridx = 1
+            gbc.weightx = 1.0
+            panel.add(moduleCombo, gbc)
+
+            gbc.gridx = 0
+            gbc.gridy = 1
+            gbc.weightx = 0.0
+            panel.add(JLabel("Variant:"), gbc)
+            gbc.gridx = 1
+            gbc.weightx = 1.0
+            panel.add(variantCombo, gbc)
+
+            gbc.gridx = 0
+            gbc.gridy = 2
+            gbc.weightx = 0.0
+            panel.add(JLabel("ABI:"), gbc)
+            gbc.gridx = 1
+            gbc.weightx = 1.0
+            panel.add(abiCombo, gbc)
+
+            gbc.gridx = 0
+            gbc.gridy = 3
+            gbc.gridwidth = 2
+            gbc.weightx = 1.0
+            infoLabel.foreground = java.awt.Color(0x8f, 0x9b, 0xa7)
+            panel.add(infoLabel, gbc)
+
+            return panel
+        }
+    }
+
+    private data class ModuleComboItem(val value: String) {
+        val display: String = shortModuleName(value)
+        override fun toString(): String = display
+    }
+
+    private inline fun <T> runReadAction(crossinline block: () -> T): T =
+        ApplicationManager.getApplication().runReadAction<T> { block() }
+
     private fun contentOrNull(primitive: kotlinx.serialization.json.JsonPrimitive?): String? =
         primitive?.let { runCatching { it.content }.getOrNull() }
+}
+
+private fun shortModuleName(path: String?): String {
+    if (path.isNullOrBlank()) return ""
+    val parts = path.split(':', '.').filter { it.isNotBlank() }
+    return parts.lastOrNull() ?: path
 }
