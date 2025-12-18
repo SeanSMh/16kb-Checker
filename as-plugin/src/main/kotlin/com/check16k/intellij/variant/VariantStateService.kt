@@ -7,9 +7,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * Project 级别缓存当前 app module 的选中 variant，并提供监听。
  *
- * 注意：
- * - modulePath 必须是 GradlePath（:app / :feature:xxx），不要用 IDE module.name 直接拼
- * - variant 优先来自 Model，其次来自 Facet(IdeaAndroidProject.selectedVariantName)
+ * 目标：
+ * 1) 能拿到 Model/Facet 的 selectedVariant 就用它（最准确）
+ * 2) 拿不到时，也要有稳定兜底（避免一直是 debug/旧值）
  */
 @Service(Service.Level.PROJECT)
 class VariantStateService(private val project: Project) {
@@ -22,6 +22,17 @@ class VariantStateService(private val project: Project) {
     private val listeners = CopyOnWriteArrayList<(VariantSelection?) -> Unit>()
     @Volatile private var installed = false
 
+    /**
+     * 可选：由调用方提供兜底 variant（比如从 artifact 文件名推断出来的）
+     * 你在 RunCheckAction 弹窗前拿到 variantGuessFromArtifact 后 set 一下就行。
+     */
+    @Volatile
+    private var fallbackVariantProvider: (() -> String?)? = null
+
+    fun setFallbackVariantProvider(provider: (() -> String?)?) {
+        fallbackVariantProvider = provider
+    }
+
     fun addListener(l: (VariantSelection?) -> Unit) {
         listeners += l
         l(current)
@@ -29,47 +40,49 @@ class VariantStateService(private val project: Project) {
 
     /**
      * 立即读取当前 app module 的选中 variant，并广播。
+     *
+     * 读不到 Model/Facet 时：使用 fallbackVariantProvider()，再不行则不更新（保留旧值）
      */
     fun refreshNow() {
         val selection = readCurrentAppSelection()
-        current = selection
-        listeners.forEach { it(selection) }
+            ?: readFallbackSelection()
+
+        // 如果这次还是拿不到，就不要把 current 置空（避免 UI 退化）
+        if (selection != null) {
+            current = selection
+            listeners.forEach { it(selection) }
+        }
     }
 
-    /**
-     * 安装监听：Gradle Sync + Build Variant 变化。
-     */
     fun installListenersOnce() {
         if (installed) return
         installed = true
 
-        // Gradle Sync 监听
         VariantSyncListener.install(project) { refreshNow() }
-
-        // Build Variant 切换监听（若可用）
         VariantSelectionListener.install(project) { refreshNow() }
 
-        // 首次读取
         refreshNow()
     }
 
-    /**
-     * 兜底：返回 app 的 GradlePath（优先 facet.getModulePath()==":app"）
-     */
     fun guessAppModulePath(): String = AppModuleLocator.findAppGradlePath(project)
 
     // -------------------- private --------------------
 
     private fun readCurrentAppSelection(): VariantSelection? {
         val ideAppModule = AppModuleLocator.findAppIdeModule(project) ?: return null
-
         val modulePath = VariantReader.getFacetModulePath(ideAppModule) ?: ":app"
 
         // 变体优先：Model -> Facet
         val variant = VariantReader.getSelectedVariantFromModels(ideAppModule)
             ?: VariantReader.getSelectedVariantForModule(ideAppModule)
 
-        return if (!variant.isNullOrBlank()) VariantSelection(modulePath = modulePath, variant = variant) else null
+        return if (!variant.isNullOrBlank()) VariantSelection(modulePath, variant) else null
+    }
+
+    private fun readFallbackSelection(): VariantSelection? {
+        val modulePath = guessAppModulePath()
+        val v = fallbackVariantProvider?.invoke()?.takeIf { it.isNotBlank() } ?: return null
+        return VariantSelection(modulePath, v)
     }
 }
 

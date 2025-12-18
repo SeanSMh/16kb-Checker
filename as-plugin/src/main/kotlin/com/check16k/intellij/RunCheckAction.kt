@@ -132,6 +132,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
 
                         val moduleShortGuess = shortModuleName(defaultModule)
                         val variantGuessFromArtifact = guessVariantFromArtifact(artifact.fileName.toString(), moduleShortGuess)
+                        svc.setFallbackVariantProvider { variantGuessFromArtifact }
 
                         val defaultVariant = settings.variantName.ifBlank {
                             val ideModule = findIdeModuleByGradlePath(project, defaultModule)
@@ -691,11 +692,12 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                 refreshVariants(mp)
             }
 
-            listOf("", "arm64-v8a", "armeabi-v7a", "x86_64", "x86").forEach { abiCombo.addItem(it) }
+            listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86").forEach { abiCombo.addItem(it) }
             if (defaultAbi.isNotBlank() && (0 until abiCombo.itemCount).none { defaultAbi == abiCombo.getItemAt(it) }) {
                 abiCombo.addItem(defaultAbi)
             }
-            abiCombo.selectedItem = defaultAbi
+            // 默认选择 arm64-v8a
+            abiCombo.selectedItem = if (defaultAbi.isNotBlank()) defaultAbi else "arm64-v8a"
 
             init()
         }
