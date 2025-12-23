@@ -5,6 +5,7 @@ plugins {
 
 dependencies {
     implementation(project(":core"))
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     compileOnly(gradleApi())
     compileOnly("com.android.tools.build:gradle:8.4.1")

@@ -9,6 +9,7 @@ data class ScanItem(
     val soName: String,
     val sha256: String,
     val issues: List<Issue>,
+    val risk: List<String> = emptyList(),
     val origin: List<OriginMatch> = emptyList(),
     val suggest: List<String> = emptyList()
 )

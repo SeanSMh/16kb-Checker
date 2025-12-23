@@ -41,15 +41,16 @@ object ReportWriter {
         builder.appendLine()
         builder.appendLine("## Failing .so (ELF/ZIP)")
         builder.appendLine()
-        builder.appendLine("| Path | ABI | Issues | SHA256 |")
-        builder.appendLine("| --- | --- | --- | --- |")
+        builder.appendLine("| Path | ABI | Issues | Risk | SHA256 |")
+        builder.appendLine("| --- | --- | --- | --- | --- |")
         report.items
             .filter { item -> item.issues.any { it.severity == Severity.FAIL } }
             .forEach { item ->
                 val issueText = item.issues
                     .filter { it.severity == Severity.FAIL }
                     .joinToString("<br>") { "${it.type}: ${it.detail}" }
-                builder.appendLine("| ${item.path} | ${item.abi ?: "-"} | $issueText | ${item.sha256} |")
+                val riskText = RiskEvaluator.risksFor(item.issues, Severity.FAIL).joinToString("<br>").ifBlank { "-" }
+                builder.appendLine("| ${item.path} | ${item.abi ?: "-"} | $issueText | $riskText | ${item.sha256} |")
             }
         return builder.toString()
     }
@@ -184,11 +185,12 @@ object ReportWriter {
               gap: 8px;
               flex-wrap: wrap;
             }
-            .col-path { width: 28%; }
-            .col-abi { width: 8%; }
-            .col-issues { width: 28%; }
+            .col-path { width: 24%; }
+            .col-abi { width: 7%; }
+            .col-issues { width: 20%; }
+            .col-risk { width: 18%; word-break: break-word; }
             .col-sha { width: 14%; word-break: break-all; }
-            .col-origin { width: 22%; word-break: break-all; }
+            .col-origin { width: 17%; word-break: break-all; }
             .text-muted { color: var(--muted); }
           </style>
         </head>
@@ -219,6 +221,7 @@ object ReportWriter {
                     <th class="col-path">Path</th>
                     <th class="col-abi">ABI</th>
                     <th class="col-issues">Issues</th>
+                    <th class="col-risk">Risk</th>
                     <th class="col-sha">SHA256</th>
                     <th class="col-origin">Origin</th>
                   </tr>
@@ -230,6 +233,7 @@ object ReportWriter {
                     <td class="col-path"><code>${escape(item.path)}</code></td>
                     <td class="col-abi">${escape(item.abi ?: "-")}</td>
                     <td class="issues fail col-issues">${issuesCell(item, Severity.FAIL)}</td>
+                    <td class="col-risk">${riskCell(item, Severity.FAIL)}</td>
                     <td class="col-sha"><code>${escape(item.sha256)}</code></td>
                     <td class="col-origin">${originCell(item)}</td>
                   </tr>
@@ -252,6 +256,7 @@ object ReportWriter {
                     <th class="col-path">Path</th>
                     <th class="col-abi">ABI</th>
                     <th class="col-issues">Issues</th>
+                    <th class="col-risk">Risk</th>
                     <th class="col-sha">SHA256</th>
                     <th class="col-origin">Origin</th>
                   </tr>
@@ -263,6 +268,7 @@ object ReportWriter {
                     <td class="col-path"><code>${escape(item.path)}</code></td>
                     <td class="col-abi">${escape(item.abi ?: "-")}</td>
                     <td class="issues warn col-issues">${issuesCell(item, Severity.WARN)}</td>
+                    <td class="col-risk">${riskCell(item, Severity.WARN)}</td>
                     <td class="col-sha"><code>${escape(item.sha256)}</code></td>
                     <td class="col-origin">${originCell(item)}</td>
                   </tr>
@@ -295,6 +301,15 @@ object ReportWriter {
             is Origin.Project -> "project:${origin.path} (${origin.source})"
             is Origin.File -> origin.path
             Origin.Unknown -> "unknown"
+        }
+    }
+
+    private fun riskCell(item: ScanItem, severity: Severity): String {
+        val risks = RiskEvaluator.risksFor(item.issues, severity)
+        return if (risks.isEmpty()) {
+            "<span class=\"text-muted\">-</span>"
+        } else {
+            risks.joinToString("<br/>") { escape(it) }
         }
     }
 

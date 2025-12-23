@@ -16,6 +16,8 @@ open class Check16kExtension @Inject constructor(objects: ObjectFactory) {
     val inferOrigin: Property<Boolean> = objects.property(Boolean::class.java).convention(true)
     val reportDir: DirectoryProperty = objects.directoryProperty()
     val formats: SetProperty<String> = objects.setProperty(String::class.java).convention(setOf("json"))
+    val strictSoNames: SetProperty<String> =
+        objects.setProperty(String::class.java).convention(setOf("libc++_shared.so"))
     val artifactType: Property<ArtifactTypePreference> =
         objects.property(ArtifactTypePreference::class.java).convention(ArtifactTypePreference.AUTO)
 }

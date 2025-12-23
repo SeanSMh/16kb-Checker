@@ -32,6 +32,7 @@ class ArchiveScanner(private val config: CheckConfig = CheckConfig()) {
             infos.forEach { info ->
                 val match = matchSo(info.name) ?: return@forEach
                 if (abiFilter.isNotEmpty() && !abiFilter.contains(match.abi)) return@forEach
+                val isStrictSo = config.strictSoNames.contains(match.soName)
                 val entry = zip.getEntry(info.name) ?: return@forEach
                 val bytes = zip.getInputStream(entry).use { it.readAllBytesSafe() }
                 val sha256 = Hashing.sha256(bytes)
@@ -65,14 +66,28 @@ class ArchiveScanner(private val config: CheckConfig = CheckConfig()) {
                     hashOrigins[sha256].orEmpty().map { OriginMatch(it, confidence = 1.0) }
                 } else emptyList()
 
-                val suggestions = buildSuggestions(issues)
+                val normalizedIssues = if (isStrictSo) {
+                    issues.map { issue ->
+                        if (issue.severity == Severity.WARN) {
+                            issue.copy(severity = Severity.FAIL)
+                        } else {
+                            issue
+                        }
+                    }
+                } else {
+                    issues
+                }
+
+                val risks = RiskEvaluator.risksFor(normalizedIssues)
+                val suggestions = buildSuggestions(normalizedIssues)
 
                 items += ScanItem(
                     path = info.name,
                     abi = match.abi,
                     soName = match.soName,
                     sha256 = sha256,
-                    issues = issues,
+                    issues = normalizedIssues,
+                    risk = risks,
                     origin = origins,
                     suggest = suggestions
                 )

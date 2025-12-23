@@ -5,10 +5,12 @@ import com.android.build.api.variant.AndroidComponentsExtension
 import com.android.build.gradle.BaseExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.component.FileComponentIdentifier
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.gradle.api.artifacts.component.ProjectComponentIdentifier
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.file.Directory
+import org.gradle.api.file.RegularFile
+import org.gradle.api.provider.Provider
 import java.io.File
 
 class Check16kPlugin : Plugin<Project> {
@@ -43,8 +45,7 @@ class Check16kPlugin : Plugin<Project> {
                     val origin = when (id) {
                         is ModuleComponentIdentifier -> "${id.group}:${id.module}:${id.version}"
                         is ProjectComponentIdentifier -> id.projectPath
-                        is FileComponentIdentifier -> artifact.file.absolutePath
-                        else -> id.displayName
+                        else -> artifact.file.absolutePath
                     }
                     artifact.file.absolutePath to origin
                 }
@@ -58,7 +59,7 @@ class Check16kPlugin : Plugin<Project> {
             ) { task ->
                 task.group = "verification"
                 task.description = "Collect native library hashes for $variantName"
-                task.aarFiles.from(artifactView.artifactFiles)
+                task.aarFiles.from(artifactView.files)
                 task.aarOrigins.set(aarOrigins)
                 task.jniLibDirs.from(jniDirs)
                 task.projectPath.set(project.path)
@@ -81,6 +82,7 @@ class Check16kPlugin : Plugin<Project> {
                 task.compressedAsError.set(extension.compressedAsError)
                 task.inferOrigin.set(extension.inferOrigin)
                 task.strict.set(extension.strict)
+                task.strictSoNames.set(extension.strictSoNames)
                 task.hashIndexFile.set(collectTask.flatMap { it.outputFile })
                 task.reportFile.set(reportFile)
 
@@ -102,15 +104,16 @@ class Check16kPlugin : Plugin<Project> {
 
     private fun selectArtifact(
         preference: ArtifactTypePreference,
-        apkProvider: com.android.build.api.variant.VariantOutputConfiguration.OutputFileProvider,
-        bundleProvider: com.android.build.api.variant.VariantOutputConfiguration.OutputFileProvider,
+        apkProvider: Provider<Directory>,
+        bundleProvider: Provider<RegularFile>,
         capitalized: String,
         project: Project
-    ): Pair<org.gradle.api.provider.Provider<java.io.File>, String> {
+    ): Pair<Provider<RegularFile>, String> {
+        val apkFileProvider = project.layout.file(apkProvider.map { dir -> resolveApkFile(dir) })
         return when (preference) {
             ArtifactTypePreference.APK -> {
                 if (apkProvider.isPresent) {
-                    apkProvider to "package$capitalized"
+                    apkFileProvider to "package$capitalized"
                 } else {
                     project.logger.warn("Requested APK but not present; falling back to bundle for $capitalized")
                     bundleProvider to "bundle$capitalized"
@@ -121,17 +124,23 @@ class Check16kPlugin : Plugin<Project> {
                     bundleProvider to "bundle$capitalized"
                 } else {
                     project.logger.warn("Requested BUNDLE but not present; falling back to apk for $capitalized")
-                    apkProvider to "package$capitalized"
+                    apkFileProvider to "package$capitalized"
                 }
             }
             ArtifactTypePreference.AUTO -> {
                 if (apkProvider.isPresent) {
-                    apkProvider to "package$capitalized"
+                    apkFileProvider to "package$capitalized"
                 } else {
                     bundleProvider to "bundle$capitalized"
                 }
             }
         }
+    }
+
+    private fun resolveApkFile(dir: Directory): File {
+        val apkFiles = dir.asFileTree.files.filter { it.name.endsWith(".apk") }
+        return apkFiles.maxByOrNull { it.lastModified() }
+            ?: throw IllegalStateException("No APK files found under ${dir.asFile}")
     }
 
     private fun resolveJniDirs(baseExtension: BaseExtension?, variantName: String, buildType: String?): List<File> {
