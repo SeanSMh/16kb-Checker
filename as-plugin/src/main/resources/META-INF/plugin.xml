@@ -1,6 +1,6 @@
 <idea-plugin>
     <id>com.check16k.intellij</id>
-    <name>16kb-check</name>
+    <name>16kb Checker</name>
     <vendor email="support@example.com">Check16k</vendor>
 
     <description>Run check16k Gradle tasks and view 16KB alignment reports with origin attribution.</description>
@@ -17,20 +17,20 @@
         <notificationGroup id="16kb-check"
                        displayType="BALLOON"
                        isLogByDefault="true"
-                       title="16kb-check"/>
+                       title="16kb Checker"/>
         <projectService serviceImplementation="com.check16k.intellij.Check16kSettingsState"/>
-        <toolWindow id="16kb-check"
+        <toolWindow id="16kb Checker"
                     anchor="bottom"
                     factoryClass="com.check16k.intellij.Check16kToolWindowFactory"
                     icon="/icons/check16k.svg"/>
         <projectConfigurable instance="com.check16k.intellij.Check16kSettingsConfigurable"
-                             displayName="16kb-check"/>
+                             displayName="16kb Checker"/>
     </extensions>
 
     <actions>
         <action id="com.check16k.intellij.RunCheckAction"
                 class="com.check16k.intellij.RunCheckAction"
-                text="Run 16kb-check"
+                text="16kb Check"
                 description="Run check16k variant Gradle task">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>

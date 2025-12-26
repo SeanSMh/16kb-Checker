@@ -4,11 +4,8 @@ import com.intellij.execution.filters.TextConsoleBuilderImpl
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.content.ContentFactory
-import java.awt.BorderLayout
-import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
 class Check16kToolWindowFactory : ToolWindowFactory {
@@ -19,7 +16,7 @@ class Check16kToolWindowFactory : ToolWindowFactory {
         val console = TextConsoleBuilderImpl(project).console
 
         // 存到 Holder，让 RunCheckAction 拿到同一个 console
-        CheckConsoleHolder.console = console
+        CheckConsoleHolder.attach(project, console)
 
         // val panel = JPanel(BorderLayout())
 
@@ -35,7 +32,7 @@ class Check16kToolWindowFactory : ToolWindowFactory {
         // 保存到 Project 级别，RunCheckAction 里就能写日志
         Check16kLogBus.attach(project, textArea)
 
-        val content = ContentFactory.getInstance().createContent(console.component, "16kb-check", false)
+        val content = ContentFactory.getInstance().createContent(console.component, "16kb Checker", false)
         toolWindow.contentManager.addContent(content)
     }
 }

@@ -9,12 +9,6 @@ object VariantReader {
      * 走 AndroidFacet -> IdeaAndroidProject.selectedVariantName（反射）
      */
     fun getSelectedVariantForModule(module: Module): String? {
-        val facet = getAndroidFacet(module)
-        println("facet=${facet != null}")
-        val idea = getIdeaAndroidProject(module)
-        println("ideaAndroidProject=${idea != null} class=${idea?.javaClass?.name}")
-        println("selectedVariantName=${idea?.let { invokeStringGetter(it, "getSelectedVariantName") }}")
-
         val ideaAndroidProject = getIdeaAndroidProject(module) ?: return null
         return invokeStringGetter(ideaAndroidProject, "getSelectedVariantName")
     }

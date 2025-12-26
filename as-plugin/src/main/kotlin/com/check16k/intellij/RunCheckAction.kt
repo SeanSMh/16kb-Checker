@@ -9,6 +9,7 @@ import com.check16k.core.ScanReport
 import com.check16k.intellij.variant.VariantReader
 import com.check16k.intellij.variant.VariantSelection
 import com.check16k.intellij.variant.VariantStateService
+import com.intellij.execution.ui.ConsoleView
 import com.intellij.execution.ui.ConsoleViewContentType
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -16,6 +17,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.module.Module
@@ -41,7 +43,10 @@ import java.io.File
 import java.io.InputStreamReader
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
@@ -51,7 +56,9 @@ import javax.swing.JTextField
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 
-class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
+class RunCheckAction : AnAction("16kb Check") {
+
+    private val ideaLogger = Logger.getInstance(RunCheckAction::class.java)
 
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
@@ -59,39 +66,32 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
         val settings = settingsComponent.state
 
         ProgressManager.getInstance().run(
-            object : Task.Backgroundable(project, "16kb-check - Scan APK/AAB + SO Origins", true) {
+            object : Task.Backgroundable(project, "16kb Checker - Scan APK/AAB + SO Origins", true) {
 
                 override fun run(indicator: ProgressIndicator) {
                     indicator.isIndeterminate = true
 
-                    val toolWindow = ToolWindowManager.getInstance(project).getToolWindow("16kb-check")
-                    toolWindow?.activate(null)
-
-                    val console = CheckConsoleHolder.console
-                    if (console == null) {
-                        notify(project, "16kb-check", "Console 未初始化：请确认 ToolWindow 已注册并打开过一次", NotificationType.ERROR)
-                        return
+                    val toolWindowId = "16kb Checker"
+                    val console = awaitConsole(project, toolWindowId, 5_000)
+                    val pump: OutputPump = if (console != null) {
+                        ConsolePump(console)
+                    } else {
+                        notify(project, "16kb Checker", "Console 未就绪：日志将写入 idea.log（可稍后打开 ToolWindow 查看）", NotificationType.WARNING)
+                        IdeaLogPump(ideaLogger)
                     }
 
-                    fun log(msg: String) {
-                        ApplicationManager.getApplication().invokeLater {
-                            console.print("[16KB] $msg\n", ConsoleViewContentType.NORMAL_OUTPUT)
-                        }
-                    }
+                    fun log(msg: String) = pump.print("[16KB] $msg\n", ConsoleViewContentType.NORMAL_OUTPUT)
+                    fun err(msg: String) = pump.print("[16KB][ERROR] $msg\n", ConsoleViewContentType.ERROR_OUTPUT)
 
-                    fun err(msg: String) {
-                        ApplicationManager.getApplication().invokeLater {
-                            console.print("[16KB][ERROR] $msg\n", ConsoleViewContentType.ERROR_OUTPUT)
-                        }
+                    if (console != null) {
+                        ApplicationManager.getApplication().invokeLater { console.clear() }
                     }
-
-                    ApplicationManager.getApplication().invokeLater { console.clear() }
                     log("Start. (Cancelable Background Task)")
 
                     // 1) 项目根目录
                     val rootDir = project.guessProjectDir()?.toNioPath()?.toFile()
                         ?: run {
-                            notify(project, "16kb-check", "无法定位项目根目录（guessProjectDir=null）", NotificationType.ERROR)
+                            notify(project, "16kb Checker", "无法定位项目根目录（guessProjectDir=null）", NotificationType.ERROR)
                             return
                         }
                     log("ProjectRoot: ${rootDir.absolutePath}")
@@ -207,7 +207,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     val manualArtifact = if (chosenArtifactPath.isNotBlank()) {
                         runCatching { Path.of(chosenArtifactPath) }.getOrElse { t ->
                             err("Invalid artifact path string: '$chosenArtifactPath' (${t.javaClass.simpleName}: ${t.message})")
-                            notify(project, "16kb-check", "产物路径无效：$chosenArtifactPath", NotificationType.ERROR)
+                            notify(project, "16kb Checker", "产物路径无效：$chosenArtifactPath", NotificationType.ERROR)
                             return
                         }
                     } else {
@@ -218,14 +218,14 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
 
                     if (artifact == null) {
                         err("No artifact selected. manualPath='${chosenArtifactPath.ifBlank { "<empty>" }}', autoDetected=${autoArtifact?.toString() ?: "<none>"}")
-                        notify(project, "16kb-check", "未找到可用的 APK/AAB：请先构建产物或在弹窗里手动填写产物路径。", NotificationType.WARNING)
+                        notify(project, "16kb Checker", "未找到可用的 APK/AAB：请先构建产物或在弹窗里手动填写产物路径。", NotificationType.WARNING)
                         return
                     }
 
                     val artifactError = validateArtifact(artifact)
                     if (artifactError != null) {
                         err("Invalid artifact: $artifactError")
-                        notify(project, "16kb-check", "产物路径无效：$artifactError", NotificationType.ERROR)
+                        notify(project, "16kb Checker", "产物路径无效：$artifactError", NotificationType.ERROR)
                         return
                     }
 
@@ -241,7 +241,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         scanner.scan(artifact, variantFromArtifact, emptyMap(), abiSet)
                     } catch (t: Throwable) {
                         err("扫描 APK/AAB 失败：${t.message}")
-                        notify(project, "16kb-check", "扫描 APK/AAB 失败：${t.message}", NotificationType.ERROR)
+                        notify(project, "16kb Checker", "扫描 APK/AAB 失败：${t.message}", NotificationType.ERROR)
                         return
                     }
                     log("产物扫描完成：total=${baseReport.summary.totalSo}, fail=${baseReport.summary.fail}, warn=${baseReport.summary.warn}")
@@ -255,7 +255,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
 
                     // 5) 执行 Gradle：生成 hash-origins
                     val gradlew = findGradlew(rootDir) ?: run {
-                        notify(project, "16kb-check", "未找到 gradlew：请确认项目根目录存在 ./gradlew", NotificationType.ERROR)
+                        notify(project, "16kb Checker", "未找到 gradlew：请确认项目根目录存在 ./gradlew", NotificationType.ERROR)
                         return
                     }
                     log("Gradlew: ${gradlew.absolutePath}")
@@ -310,9 +310,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                                 BufferedReader(InputStreamReader(pRef.inputStream, Charsets.UTF_8)).useLines { lines ->
                                     lines.forEach { line ->
                                         if (indicator.isCanceled) return@forEach
-                                        ApplicationManager.getApplication().invokeLater {
-                                            console.print(line + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
-                                        }
+                                        pump.print(line + "\n", ConsoleViewContentType.NORMAL_OUTPUT)
                                     }
                                 }
                             } catch (_: Throwable) { }
@@ -323,9 +321,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                                 BufferedReader(InputStreamReader(pRef.errorStream, Charsets.UTF_8)).useLines { lines ->
                                     lines.forEach { line ->
                                         if (indicator.isCanceled) return@forEach
-                                        ApplicationManager.getApplication().invokeLater {
-                                            console.print(line + "\n", ConsoleViewContentType.ERROR_OUTPUT)
-                                        }
+                                        pump.print(line + "\n", ConsoleViewContentType.ERROR_OUTPUT)
                                     }
                                 }
                             } catch (_: Throwable) { }
@@ -343,7 +339,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                                 err("Canceled by user. Killing Gradle process...")
                                 pRef.destroy()
                                 pRef.destroyForcibly()
-                                notify(project, "16kb-check", "已取消：Gradle 进程已终止", NotificationType.WARNING)
+                            notify(project, "16kb Checker", "已取消：Gradle 进程已终止", NotificationType.WARNING)
                                 return
                             }
 
@@ -353,7 +349,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                             if (System.nanoTime() > deadlineNs) {
                                 err("Gradle timeout (>15min). Killing process...")
                                 pRef.destroyForcibly()
-                                notify(project, "16kb-check", "Gradle 执行超时（>15 分钟）", NotificationType.ERROR)
+                            notify(project, "16kb Checker", "Gradle 执行超时（>15 分钟）", NotificationType.ERROR)
                                 break
                             }
                         }
@@ -369,12 +365,12 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         } else {
                             err("Gradle 未成功生成 hash-origins（exit=$exit, exists=${hashOriginsJson.exists()}, size=${hashOriginsJson.length()}）")
                             err("Tip: merged_native_libs 为空/未生成，通常说明 merge<Variant>NativeLibs 没跑成功或 variant 不存在。")
-                            notify(project, "16kb-check", "脚本执行完成，但 hash-origins 未生成或为空。", NotificationType.WARNING)
+                            notify(project, "16kb Checker", "脚本执行完成，但 hash-origins 未生成或为空。", NotificationType.WARNING)
                         }
 
                     } catch (t: Throwable) {
                         err("Exception: ${t.message}")
-                        notify(project, "16kb-check", "执行异常：${t.message}", NotificationType.ERROR)
+                        notify(project, "16kb Checker", "执行异常：${t.message}", NotificationType.ERROR)
                     } finally {
                         try {
                             if (initScript.exists()) {
@@ -408,7 +404,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         }
                     } catch (t: Throwable) {
                         err("写入报告失败：${t.message}")
-                        notify(project, "16kb-check", "写入报告失败：${t.message}", NotificationType.ERROR)
+                        notify(project, "16kb Checker", "写入报告失败：${t.message}", NotificationType.ERROR)
                         return
                     }
 
@@ -426,7 +422,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     val summary = "扫描完成：total=${finalReport.summary.totalSo}, fail=${finalReport.summary.fail}, warn=${finalReport.summary.warn}"
                     val originNote = if (hashOriginsMap.isEmpty()) "\n来源信息未补充（hash-origins 为空/失败）。" else "\n来源已补充到报告。"
                     val htmlNote = if (settings.htmlReport) "\nHTML 报告已保存到同目录。" else ""
-                    notify(project, "16kb-check", summary + "\n报告已保存：" + jsonOut + htmlNote + originNote, severity)
+                    notify(project, "16kb Checker", summary + "\n报告已保存：" + jsonOut + htmlNote + originNote, severity)
                 }
             }
         )
@@ -542,6 +538,72 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
     private fun notify(project: Project, title: String, content: String, type: NotificationType) {
         val group = NotificationGroupManager.getInstance().getNotificationGroup("16kb-check")
         group.createNotification(title, content, type).notify(project)
+    }
+
+    private interface OutputPump {
+        fun print(text: String, type: ConsoleViewContentType)
+    }
+
+    private class IdeaLogPump(private val logger: Logger) : OutputPump {
+        override fun print(text: String, type: ConsoleViewContentType) {
+            val t = text.trimEnd()
+            if (t.isEmpty()) return
+            if (type == ConsoleViewContentType.ERROR_OUTPUT) {
+                logger.warn(t)
+            } else {
+                logger.info(t)
+            }
+        }
+    }
+
+    private fun awaitConsole(project: Project, toolWindowId: String, timeoutMs: Long): ConsoleView? {
+        CheckConsoleHolder.get(project)?.let { return it }
+
+        val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(toolWindowId) ?: return null
+        val latch = CountDownLatch(1)
+        ApplicationManager.getApplication().invokeLater {
+            toolWindow.activate(Runnable { latch.countDown() }, true)
+        }
+
+        runCatching { latch.await(timeoutMs, TimeUnit.MILLISECONDS) }
+
+        val pollDeadlineNs = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(750)
+        while (System.nanoTime() < pollDeadlineNs) {
+            CheckConsoleHolder.get(project)?.let { return it }
+            runCatching { Thread.sleep(25) }
+        }
+        return CheckConsoleHolder.get(project)
+    }
+
+    private class ConsolePump(private val console: ConsoleView) : OutputPump {
+        private data class Entry(val text: String, val type: ConsoleViewContentType)
+
+        private val queue = ConcurrentLinkedQueue<Entry>()
+        private val scheduled = AtomicBoolean(false)
+
+        override fun print(text: String, type: ConsoleViewContentType) {
+            queue.add(Entry(text, type))
+            scheduleFlush()
+        }
+
+        private fun scheduleFlush() {
+            if (!scheduled.compareAndSet(false, true)) return
+            ApplicationManager.getApplication().invokeLater { flush() }
+        }
+
+        private fun flush() {
+            var processedChars = 0
+            var processedEntries = 0
+            while (true) {
+                val entry = queue.poll() ?: break
+                console.print(entry.text, entry.type)
+                processedEntries++
+                processedChars += entry.text.length
+                if (processedEntries >= 800 || processedChars >= 64_000) break
+            }
+            scheduled.set(false)
+            if (queue.isNotEmpty()) scheduleFlush()
+        }
     }
 
     // ------------------------

@@ -20,7 +20,7 @@ class Check16kSettingsConfigurable(private val project: Project) : Configurable 
     private val statusLabel = JLabel().apply { foreground = java.awt.Color(0x9a, 0x9a, 0x9a) }
     private var panel: JPanel? = null
 
-    override fun getDisplayName(): String = "16kb-check"
+    override fun getDisplayName(): String = "16kb Checker"
 
     override fun createComponent(): JComponent {
         val p = JPanel(GridBagLayout())
