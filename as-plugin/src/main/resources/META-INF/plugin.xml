@@ -1,9 +1,9 @@
 <idea-plugin>
-    <id>com.check16k.intellij</id>
+    <id>com.bril.check16k</id>
     <name>16kb Checker</name>
     <vendor email="1332565823@qq.com">Bril</vendor>
 
-    <description><![CDATA[
+    <description><![CDATA[16KB Checker helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.
     <p><b>Slogan:</b> 16KB 一键体检，原生库对齐合格才放心。</p>
     <p><b>16kb Checker</b> helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.</p>
     <p><b>Compatibility:</b> Android Studio based on IntelliJ Platform build <b>231+</b> (typically Flamingo+).</p>

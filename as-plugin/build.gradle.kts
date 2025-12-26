@@ -28,7 +28,6 @@ tasks {
     patchPluginXml {
         // 兼容 231+（Android Studio 基于 231，亦兼容更高版本）
         sinceBuild.set("231")
-        untilBuild.set("999.*")
         changeNotes.set(
             """
             <p><b>0.1.0</b></p>
@@ -40,6 +39,7 @@ tasks {
         )
         pluginDescription.set(
             """
+            16KB Checker helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.
             <p><b>Slogan:</b> 16KB 一键体检，原生库对齐合格才放心。</p>
             <p><b>16kb Checker</b> helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.</p>
             <p><b>Compatibility:</b> Android Studio based on IntelliJ Platform build <b>231+</b> (typically Flamingo+).</p>
