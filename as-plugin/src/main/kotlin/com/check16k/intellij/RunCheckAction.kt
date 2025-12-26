@@ -16,6 +16,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.fileChooser.FileChooser
+import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.progress.ProgressIndicator
@@ -33,16 +35,19 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.awt.BorderLayout
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
+import javax.swing.JTextField
 import kotlin.io.path.extension
 import kotlin.io.path.isRegularFile
 
@@ -93,18 +98,31 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
 
                     // 2) 定位产物（APK/AAB）
                     indicator.text = "查找 APK/AAB 产物..."
-                    val artifact = findLatestArtifact(rootDir.toPath())
-                    if (artifact == null) {
-                        notify(project, "16kb-check", "未找到可用的 APK/AAB，请先构建产物。", NotificationType.WARNING)
-                        return
+                    val autoArtifact = findLatestArtifact(rootDir.toPath())
+                    val savedArtifactPath = settings.artifactPath.trim()
+                    if (savedArtifactPath.isNotBlank()) {
+                        log("Saved artifactPath: $savedArtifactPath")
                     }
-                    val variantFromArtifact = artifact.fileName.toString().substringBeforeLast(".")
-                    log("Artifact: ${artifact.toAbsolutePath()} (variant=$variantFromArtifact)")
+                    if (autoArtifact != null) {
+                        log("Auto-detected artifact: ${autoArtifact.toAbsolutePath()}")
+                    } else {
+                        log("Auto-detected artifact: <none>")
+                    }
+
+                    fun validateArtifact(path: Path): String? {
+                        val p = path.toAbsolutePath().normalize()
+                        if (!Files.exists(p)) return "路径不存在：$p"
+                        if (!p.isRegularFile()) return "不是文件：$p"
+                        val ext = p.extension.lowercase()
+                        if (ext != "apk" && ext != "aab") return "不支持的文件类型：$p（仅支持 .apk/.aab）"
+                        return null
+                    }
 
                     // 2.1) 弹窗选择 module/variant/abi（需在 EDT）
                     var chosenModule = settings.modulePath
                     var chosenVariant = settings.variantName
                     var chosenAbi = settings.abiFilter
+                    var chosenArtifactPath = ""
                     var canceled = false
 
                     ApplicationManager.getApplication().invokeAndWait {
@@ -131,7 +149,15 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         )
 
                         val moduleShortGuess = shortModuleName(defaultModule)
-                        val variantGuessFromArtifact = guessVariantFromArtifact(artifact.fileName.toString(), moduleShortGuess)
+                        val artifactForGuess = runCatching {
+                            if (savedArtifactPath.isNotBlank()) Path.of(savedArtifactPath) else null
+                        }.getOrNull()
+                        val artifactForGuessOk = artifactForGuess?.let { validateArtifact(it) == null } == true
+                        val artifactNameForGuess = (if (artifactForGuessOk) artifactForGuess else autoArtifact)
+                            ?.fileName
+                            ?.toString()
+
+                        val variantGuessFromArtifact = artifactNameForGuess?.let { guessVariantFromArtifact(it, moduleShortGuess) }
                         svc.setFallbackVariantProvider { variantGuessFromArtifact }
 
                         val defaultVariant = settings.variantName.ifBlank {
@@ -149,10 +175,12 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         }
 
                         val defaultAbi = settings.abiFilter
+                        val defaultArtifactPath = savedArtifactPath.ifBlank { autoArtifact?.toString().orEmpty() }
 
                         val dialog = ModuleVariantDialog(
                             project = project,
                             modules = androidModules,
+                            defaultArtifactPath = defaultArtifactPath,
                             defaultModule = defaultModule,
                             defaultVariant = defaultVariant,
                             defaultAbi = defaultAbi,
@@ -167,12 +195,43 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                         chosenModule = normalizeGradleModulePath(project, dialog.selectedModulePath.ifBlank { defaultModule })
                         chosenVariant = dialog.selectedVariant.ifBlank { defaultVariant }
                         chosenAbi = dialog.selectedAbi.trim()
+                        chosenArtifactPath = dialog.selectedArtifactPath.trim()
 
+                        settings.artifactPath = chosenArtifactPath
                         settings.modulePath = chosenModule
                         settings.variantName = chosenVariant
                         settings.abiFilter = chosenAbi
                     }
                     if (canceled) return
+
+                    val manualArtifact = if (chosenArtifactPath.isNotBlank()) {
+                        runCatching { Path.of(chosenArtifactPath) }.getOrElse { t ->
+                            err("Invalid artifact path string: '$chosenArtifactPath' (${t.javaClass.simpleName}: ${t.message})")
+                            notify(project, "16kb-check", "产物路径无效：$chosenArtifactPath", NotificationType.ERROR)
+                            return
+                        }
+                    } else {
+                        null
+                    }
+
+                    val artifact = manualArtifact ?: autoArtifact
+
+                    if (artifact == null) {
+                        err("No artifact selected. manualPath='${chosenArtifactPath.ifBlank { "<empty>" }}', autoDetected=${autoArtifact?.toString() ?: "<none>"}")
+                        notify(project, "16kb-check", "未找到可用的 APK/AAB：请先构建产物或在弹窗里手动填写产物路径。", NotificationType.WARNING)
+                        return
+                    }
+
+                    val artifactError = validateArtifact(artifact)
+                    if (artifactError != null) {
+                        err("Invalid artifact: $artifactError")
+                        notify(project, "16kb-check", "产物路径无效：$artifactError", NotificationType.ERROR)
+                        return
+                    }
+
+                    val artifactSource = if (chosenArtifactPath.isNotBlank()) "manual" else "auto"
+                    val variantFromArtifact = artifact.fileName.toString().substringBeforeLast(".")
+                    log("Using artifact ($artifactSource): ${artifact.toAbsolutePath()} (variant=$variantFromArtifact)")
 
                     // 3) 扫描产物
                     indicator.text = "扫描产物..."
@@ -204,7 +263,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                     val modulePath = normalizeGradleModulePath(project, chosenModule.ifBlank { ":app" })
                     val mergeVariantName = chosenVariant.ifBlank { variantFromArtifact }
                     val abiFilter = chosenAbi.trim()
-                    log("Selected module/variant: module=$modulePath, variant=$mergeVariantName, abi=${if (abiFilter.isBlank()) "all" else abiFilter}")
+                    log("Selected module/variant: module=$modulePath, variant=$mergeVariantName, abi=${if (abiFilter.isBlank()) "all" else abiFilter}, artifactSource=$artifactSource")
 
                     val mergeTask = "${modulePath}:merge${mergeVariantName.replaceFirstChar { it.uppercase() }}NativeLibs"
 
@@ -619,17 +678,22 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
     private class ModuleVariantDialog(
         private val project: Project,
         private val modules: List<AndroidModuleEntry>,
+        private val defaultArtifactPath: String,
         private val defaultModule: String,
         private val defaultVariant: String,
         private val defaultAbi: String,
         private val logger: (String) -> Unit
     ) : DialogWrapper(project, true) {
 
+        private val artifactField = JTextField()
+        private val browseButton = JButton("Browse...")
         private val moduleCombo = JComboBox<ModuleComboItem>()
         private val variantCombo = JComboBox<String>()
         private val abiCombo = JComboBox<String>()
-        private val infoLabel = JLabel("可编辑：直接输入 module/variant/abi，或从下拉选择")
+        private val infoLabel = JLabel("可编辑：artifact 为空则自动查找；module/variant/abi 可直接输入或从下拉选择")
 
+        val selectedArtifactPath: String
+            get() = artifactField.text.trim()
         val selectedModulePath: String
             get() = (moduleCombo.selectedItem as? ModuleComboItem)?.value?.trim().orEmpty()
         val selectedVariant: String
@@ -638,10 +702,26 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             get() = abiCombo.selectedItem?.toString()?.trim().orEmpty()
 
         init {
-            title = "选择 Module / Variant / ABI"
+            title = "选择 Artifact / Module / Variant / ABI"
+            artifactField.text = defaultArtifactPath
             moduleCombo.isEditable = true
             variantCombo.isEditable = true
             abiCombo.isEditable = true
+
+            browseButton.addActionListener {
+                val descriptor = FileChooserDescriptor(true, false, false, false, false, false).apply {
+                    title = "Select APK/AAB"
+                    description = "Select an .apk or .aab file"
+                }
+                val initial = artifactField.text.trim()
+                    .takeIf { it.isNotBlank() }
+                    ?.let { LocalFileSystem.getInstance().refreshAndFindFileByPath(it) }
+                val chosen = FileChooser.chooseFile(descriptor, project, initial)
+                if (chosen != null) {
+                    artifactField.text = chosen.path
+                    logger("Artifact selected from file chooser: ${chosen.path}")
+                }
+            }
 
             modules.forEach { moduleCombo.addItem(ModuleComboItem(it.modulePath)) }
             if (moduleCombo.itemCount == 0) {
@@ -712,13 +792,24 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
                 insets = java.awt.Insets(6, 6, 6, 6)
             }
 
+            panel.add(JLabel("Artifact (.apk/.aab):"), gbc)
+            gbc.gridx = 1
+            gbc.weightx = 1.0
+            panel.add(JPanel(BorderLayout(6, 0)).apply {
+                add(artifactField, BorderLayout.CENTER)
+                add(browseButton, BorderLayout.EAST)
+            }, gbc)
+
+            gbc.gridx = 0
+            gbc.gridy = 1
+            gbc.weightx = 0.0
             panel.add(JLabel("Module:"), gbc)
             gbc.gridx = 1
             gbc.weightx = 1.0
             panel.add(moduleCombo, gbc)
 
             gbc.gridx = 0
-            gbc.gridy = 1
+            gbc.gridy = 2
             gbc.weightx = 0.0
             panel.add(JLabel("Variant:"), gbc)
             gbc.gridx = 1
@@ -726,7 +817,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             panel.add(variantCombo, gbc)
 
             gbc.gridx = 0
-            gbc.gridy = 2
+            gbc.gridy = 3
             gbc.weightx = 0.0
             panel.add(JLabel("ABI:"), gbc)
             gbc.gridx = 1
@@ -734,7 +825,7 @@ class RunCheckAction : AnAction("16kb-check: Scan APK/AAB + SO Origins") {
             panel.add(abiCombo, gbc)
 
             gbc.gridx = 0
-            gbc.gridy = 3
+            gbc.gridy = 4
             gbc.gridwidth = 2
             gbc.weightx = 1.0
             infoLabel.foreground = java.awt.Color(0x8f, 0x9b, 0xa7)

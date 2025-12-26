@@ -17,6 +17,7 @@ class Check16kSettingsState : PersistentStateComponent<Check16kSettingsState.Sta
     data class State(
         var reportDir: String = "check-result",
         var htmlReport: Boolean = true,
+        var artifactPath: String = "",
         var modulePath: String = "",
         var variantName: String = "",
         var abiFilter: String = "" // 为空表示全 ABI
