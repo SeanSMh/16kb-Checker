@@ -22,7 +22,6 @@ intellij {
 
 dependencies {
     implementation(project(":core"))
-    implementation(kotlin("stdlib"))
 }
 
 tasks {
@@ -30,6 +29,15 @@ tasks {
         // 兼容 231+（Android Studio 基于 231，亦兼容更高版本）
         sinceBuild.set("231")
         untilBuild.set("999.*")
+        changeNotes.set(
+            """
+            <p><b>0.1.0</b></p>
+            <ul>
+              <li>Initial release: scan APK/AAB for 16KB alignment and generate reports.</li>
+              <li>Optional origin attribution via Gradle task integration.</li>
+            </ul>
+            """.trimIndent()
+        )
         pluginDescription.set(
             """
             <p><b>Slogan:</b> 16KB 一键体检，原生库对齐合格才放心。</p>
@@ -51,8 +59,13 @@ tasks {
             """.trimIndent()
         )
     }
+    signPlugin {
+        certificateChain.set(providers.environmentVariable("JETBRAINS_CERTIFICATE_CHAIN"))
+        privateKey.set(providers.environmentVariable("JETBRAINS_PRIVATE_KEY"))
+        password.set(providers.environmentVariable("JETBRAINS_PRIVATE_KEY_PASSWORD"))
+    }
     publishPlugin {
-        // Configure plugin publishing if needed.
+        token.set(providers.environmentVariable("JETBRAINS_TOKEN"))
     }
 }
 
