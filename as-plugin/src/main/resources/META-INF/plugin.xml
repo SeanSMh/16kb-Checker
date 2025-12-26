@@ -1,9 +1,26 @@
 <idea-plugin>
     <id>com.check16k.intellij</id>
     <name>16kb Checker</name>
-    <vendor email="support@example.com">Check16k</vendor>
+    <vendor email="1332565823@qq.com">Bril</vendor>
 
-    <description>Run check16k Gradle tasks and view 16KB alignment reports with origin attribution.</description>
+    <description><![CDATA[
+    <p><b>Slogan:</b> 16KB 一键体检，原生库对齐合格才放心。</p>
+    <p><b>16kb Checker</b> helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.</p>
+    <p><b>Compatibility:</b> Android Studio based on IntelliJ Platform build <b>231+</b> (typically Flamingo+).</p>
+    <p><b>What it does</b></p>
+    <ul>
+      <li>Scan an APK/AAB and generate a report (JSON / optional HTML).</li>
+      <li>Optionally run a Gradle task to collect SO origin attribution and enrich the report.</li>
+      <li>Support manual artifact path input; if empty, auto-detect the latest APK/AAB.</li>
+      <li>Show logs in a dedicated ToolWindow; fallback to idea.log if the console is not ready.</li>
+    </ul>
+    <p><b>How to use</b></p>
+    <ol>
+      <li>Open <i>Tools</i> menu and run <b>16kb Check</b>.</li>
+      <li>Select module / variant / ABI and (optionally) provide an APK/AAB path.</li>
+      <li>View results in the ToolWindow and the output report directory.</li>
+    </ol>
+    ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.gradle</depends>
