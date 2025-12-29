@@ -14,6 +14,7 @@ intellij {
     version.set("2023.1.5")
     type.set("IC")
     pluginName.set("16kb-check")
+    updateSinceUntilBuild.set(false)
     // 使用明确的插件 ID，保证 Gradle External System API 进入编译类路径
 
     plugins.set(listOf("java", "org.jetbrains.plugins.gradle", "android"))
@@ -26,10 +27,16 @@ dependencies {
 
 tasks {
     patchPluginXml {
-        // 兼容 231+（Android Studio 基于 231，亦兼容更高版本）
-        sinceBuild.set("231")
         changeNotes.set(
             """
+            <p><b>0.1.2</b></p>
+            <ul>
+              <li>Relax Android Gradle plugin dependency for better installation compatibility.</li>
+            </ul>
+            <p><b>0.1.1</b></p>
+            <ul>
+              <li>Fix Marketplace validation issues and packaging metadata.</li>
+            </ul>
             <p><b>0.1.0</b></p>
             <ul>
               <li>Initial release: scan APK/AAB for 16KB alignment and generate reports.</li>
@@ -42,7 +49,7 @@ tasks {
             16KB Checker helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.
             <p><b>Slogan:</b> 16KB 一键体检，原生库对齐合格才放心。</p>
             <p><b>16kb Checker</b> helps Android projects verify whether APK/AAB native libraries meet the 16KB page alignment requirement.</p>
-            <p><b>Compatibility:</b> Android Studio based on IntelliJ Platform build <b>231+</b> (typically Flamingo+).</p>
+            <p><b>Compatibility:</b> Android Studio (231+) only.</p>
             <p><b>What it does</b></p>
             <ul>
               <li>Scan an APK/AAB and generate a report (JSON / optional HTML).</li>

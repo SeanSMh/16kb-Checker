@@ -5,7 +5,7 @@ plugins {
 
 allprojects {
     group = "com.check16k"
-    version = "0.1.0"
+    version = "0.1.2"
 
     repositories {
         google()
