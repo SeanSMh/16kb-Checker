@@ -2,6 +2,9 @@
 
 `16KB Checker` is a Kotlin-based toolchain for analyzing Android build artifacts and detecting native library risks related to 16 KB page-size compatibility.
 
+## 📥 Download / Install
+**JetBrains Marketplace:** [16KB Checker Plugin](https://plugins.jetbrains.com/plugin/29522-16kb-checker)
+
 ## Features
 
 - Scan APK and AAB artifacts directly
